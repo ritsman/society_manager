@@ -1,0 +1,40 @@
+# docker-compose.yml
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: society_postgres
+    environment:
+      POSTGRES_USER: superadmin
+      POSTGRES_PASSWORD: secretpassword
+      POSTGRES_DB: society_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  app:
+    container_name: society_nextjs
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    environment:
+      # This URL connects the Next.js container to the Postgres container
+      - DATABASE_URL=postgresql://superadmin:secretpassword@db:5432/society_db?schema=public
+    ports:
+      - "3000:3000"
+    volumes:
+      # Syncs your Windows local files with the container for hot-reloading
+      - .:/app
+      # Prevents Windows host from overwriting the container's node_modules and .next build
+      - /app/node_modules
+      - /app/.next
+    depends_on:
+      - db
+    restart: unless-stopped
+
+volumes:
+  # Creates a persistent volume for your database data
+  pgdata:
