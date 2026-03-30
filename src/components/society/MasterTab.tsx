@@ -1,236 +1,569 @@
 "use client";
 
 import { useState } from "react";
-import { saveMasterSettings } from "@/app/actions/masterActions";
-// We will use these for the database sync later
-// import { updateLedgerConfig, updateSocietyBilling } from "@/app/actions/masterActions";
+import {
+  saveBillingConfiguration,
+  saveMasterSettings,
+} from "@/app/actions/masterActions";
 
-type MasterSubTab = "Bill Heads" | "Interest & Frequency";
+type MasterSubTab = "Accounts" | "Interest & Frequency";
+type FinancialHead =
+  | "CURRENT_ASSET"
+  | "CURRENT_LIABILITY"
+  | "FIXED_ASSET"
+  | "INCOME"
+  | "EXPENSE"
+  | "CAPITAL"
+  | "LOANS"
+  | "SUNDRY_CREDITORS"
+  | "SUNDRY_DEBTORS";
+type CalculationType = "FIXED" | "PERCENTAGE" | "SQFT";
+
+type SocietyAccount = {
+  id: string;
+  globalLedgerHeadId?: string | null;
+  accountName: string;
+  financialHead: FinancialHead;
+  calculationType: CalculationType;
+  isActive: boolean;
+  includeInMaintenanceBill: boolean;
+  interestApplicable: boolean;
+  defaultAmount: number | string;
+};
+
+type BillFrequency =
+  | "MONTHLY"
+  | "BIMONTHLY"
+  | "TRIMONTHLY"
+  | "QUARTERLY"
+  | "SEMESTER"
+  | "YEARLY";
+
+type BillingConfig = {
+  fixedInterestEnabled: boolean;
+  fixedInterestValue: number | string;
+  interestRebateValue: number | string;
+  interestRebateGraceDays: number;
+  simpleInterestRateMonthly: number | string;
+  billGenerationDay: number;
+  billFrequency: BillFrequency;
+};
+
+const financialHeadOptions: { value: FinancialHead; label: string }[] = [
+  { value: "CURRENT_ASSET", label: "Current Asset" },
+  { value: "CURRENT_LIABILITY", label: "Current Liability" },
+  { value: "FIXED_ASSET", label: "Fixed Asset" },
+  { value: "INCOME", label: "Income" },
+  { value: "EXPENSE", label: "Expense" },
+  { value: "CAPITAL", label: "Capital" },
+  { value: "LOANS", label: "Loans" },
+  { value: "SUNDRY_CREDITORS", label: "Sundry Creditors" },
+  { value: "SUNDRY_DEBTORS", label: "Sundry Debtors" },
+];
+
+const calculationTypeOptions: { value: CalculationType; label: string }[] = [
+  { value: "FIXED", label: "Fixed Amount" },
+  { value: "PERCENTAGE", label: "% of Maintenance" },
+  { value: "SQFT", label: "Per Sq. Ft." },
+];
+
+const billFrequencyOptions: { value: BillFrequency; label: string }[] = [
+  { value: "MONTHLY", label: "Monthly" },
+  { value: "BIMONTHLY", label: "Bi-monthly" },
+  { value: "TRIMONTHLY", label: "Tri-monthly" },
+  { value: "QUARTERLY", label: "Quarterly" },
+  { value: "SEMESTER", label: "Semester" },
+  { value: "YEARLY", label: "Yearly" },
+];
 
 export default function MasterTab({
   societyId,
-  globalHeads,
-  existingConfigs,
+  accounts,
+  billingConfig,
 }: {
   societyId: string;
-  globalHeads: any[];
-  existingConfigs: any[];
+  accounts: SocietyAccount[];
+  billingConfig: BillingConfig;
 }) {
-  const [activeSubTab, setActiveSubTab] = useState<MasterSubTab>("Bill Heads");
-  const [loading, setLoading] = useState(false);
-  const [localSettings, setLocalSettings] = useState(globalHeads);
+  const [activeSubTab, setActiveSubTab] = useState<MasterSubTab>("Accounts");
+  const [localAccounts, setLocalAccounts] = useState(accounts);
+  const [localBillingConfig, setLocalBillingConfig] = useState(billingConfig);
   const [isSaving, setIsSaving] = useState(false);
 
-  const handleToggle = (id: string) => {
-    setLocalSettings((prev) =>
-      prev.map((head) =>
-        head.id === id ? { ...head, isActive: !head.isActive } : head,
+  const handleFieldChange = <K extends keyof SocietyAccount>(
+    id: string,
+    field: K,
+    value: SocietyAccount[K],
+  ) => {
+    setLocalAccounts((prev) =>
+      prev.map((account) =>
+        account.id === id ? { ...account, [field]: value } : account,
       ),
     );
   };
 
-  const handleAmountChange = (id: string, value: string) => {
-    setLocalSettings((prev) =>
-      prev.map((head) =>
-        head.id === id
-          ? { ...head, defaultAmount: parseFloat(value) || 0 }
-          : head,
-      ),
-    );
+  const addCustomAccount = () => {
+    setLocalAccounts((prev) => [
+      ...prev,
+      {
+        id: `new-${Date.now()}`,
+        globalLedgerHeadId: null,
+        accountName: "",
+        financialHead: "CURRENT_ASSET",
+        calculationType: "FIXED",
+        isActive: true,
+        includeInMaintenanceBill: false,
+        interestApplicable: false,
+        defaultAmount: 0,
+      },
+    ]);
   };
+
   const onSave = async () => {
     setIsSaving(true);
-    const payload = localSettings.map((s) => ({
-      globalLedgerHeadId: s.id,
-      isActive: s.isActive,
-      defaultAmount: s.defaultAmount,
+
+    const payload = localAccounts.map((account) => ({
+      id: account.id,
+      globalLedgerHeadId: account.globalLedgerHeadId ?? null,
+      accountName: account.accountName.trim(),
+      financialHead: account.financialHead,
+      calculationType: account.calculationType,
+      isActive: account.isActive,
+      includeInMaintenanceBill: account.includeInMaintenanceBill,
+      interestApplicable: account.interestApplicable,
+      defaultAmount: Number(account.defaultAmount) || 0,
     }));
 
     const result = await saveMasterSettings(societyId, payload);
     setIsSaving(false);
 
     if (result.success) {
-      alert("Settings saved successfully!");
-    } else {
-      alert("Error saving: " + result.error);
+      alert("Accounts saved successfully!");
+      return;
     }
+
+    alert("Error saving: " + result.error);
   };
-  const handleCalcTypeChange = (id: string, value: string) => {
-    setLocalSettings((prev) =>
-      prev.map((head) =>
-        head.id === id ? { ...head, calculationType: value } : head,
+
+  const handleBillingFieldChange = <K extends keyof BillingConfig>(
+    field: K,
+    value: BillingConfig[K],
+  ) => {
+    setLocalBillingConfig((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const onSaveBillingConfiguration = async () => {
+    setIsSaving(true);
+
+    const result = await saveBillingConfiguration(societyId, {
+      fixedInterestEnabled: localBillingConfig.fixedInterestEnabled,
+      fixedInterestValue: Number(localBillingConfig.fixedInterestValue) || 0,
+      interestRebateValue: Number(localBillingConfig.interestRebateValue) || 0,
+      interestRebateGraceDays:
+        Math.max(0, Number(localBillingConfig.interestRebateGraceDays)) || 0,
+      simpleInterestRateMonthly:
+        Number(localBillingConfig.simpleInterestRateMonthly) || 0,
+      billGenerationDay: Math.min(
+        31,
+        Math.max(1, Number(localBillingConfig.billGenerationDay) || 1),
       ),
-    );
+      billFrequency: localBillingConfig.billFrequency,
+    });
+
+    setIsSaving(false);
+
+    if (result.success) {
+      alert("Billing configuration saved successfully!");
+      return;
+    }
+
+    alert("Error saving: " + result.error);
   };
+
+  const groupedAccounts = financialHeadOptions
+    .map((head) => ({
+      ...head,
+      accounts: localAccounts.filter((account) => account.financialHead === head.value),
+    }))
+    .filter((group) => group.accounts.length > 0);
+
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      {/* Secondary Navigation for Master Section */}
-      <div className="flex space-x-1 bg-gray-100 p-1 rounded-xl w-fit">
-        {["Bill Heads", "Interest & Frequency"].map((tab) => (
-          <button
-            key={tab}
-            onClick={() => setActiveSubTab(tab as MasterSubTab)}
-            className={`px-6 py-2 text-sm font-semibold rounded-lg transition-all
-              ${
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex space-x-1 rounded-xl bg-gray-100 p-1 w-fit">
+          {["Accounts", "Interest & Frequency"].map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setActiveSubTab(tab as MasterSubTab)}
+              className={`rounded-lg px-6 py-2 text-sm font-semibold transition-all ${
                 activeSubTab === tab
                   ? "bg-white text-blue-600 shadow-sm"
                   : "text-gray-500 hover:text-gray-700"
-              }
-            `}
+              }`}
+            >
+              {tab}
+            </button>
+          ))}
+        </div>
+
+        {activeSubTab === "Accounts" && (
+          <button
+            onClick={addCustomAccount}
+            className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-100"
           >
-            {tab}
+            + Add Account
           </button>
-        ))}
+        )}
       </div>
 
-      <div className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden">
-        {activeSubTab === "Bill Heads" && (
+      <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
+        {activeSubTab === "Accounts" && (
           <div className="p-0">
-            <div className="p-6 border-b border-gray-100 bg-gray-50/50">
-              <h3 className="text-lg font-bold text-gray-800">
-                Accounting Master
-              </h3>
+            <div className="border-b border-gray-100 bg-gray-50/50 p-6">
+              <h3 className="text-lg font-bold text-gray-800">Accounts Master</h3>
               <p className="text-sm text-gray-500">
-                Activate applicable heads and set default monthly rates for this
-                society.
+                Organize society accounts under the right financial head and
+                manage the default billing setup here.
               </p>
             </div>
 
-            <table className="w-full text-left text-sm">
-              <thead className="bg-gray-50 text-gray-600 font-medium border-b">
-                <tr>
-                  <th className="px-6 py-4">Ledger Head</th>
-                  <th className="px-6 py-4 text-center">Status</th>
-                  <th className="px-6 py-4">Default Amount (₹)</th>
-                  <th className="px-6 py-4">Calculation Type</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {localSettings.map((head) => (
-                  <tr
-                    key={head.id}
-                    className="hover:bg-blue-50/30 transition-colors"
-                  >
-                    <td className="px-6 py-4 font-medium text-gray-700">
-                      {head.name}
-                    </td>
-                    <td className="px-6 py-4 text-center">
-                      <label className="relative inline-flex items-center cursor-pointer">
-                        {/* 1. Link Checkbox to handleToggle */}
-                        <input
-                          type="checkbox"
-                          className="sr-only peer"
-                          checked={head.isActive}
-                          onChange={() => handleToggle(head.id)}
-                        />
-                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-                      </label>
-                    </td>
-                    <td className="px-6 py-4">
-                      {/* 2. Link Input to handleAmountChange */}
-                      <input
-                        type="number"
-                        placeholder="0.00"
-                        value={head.defaultAmount || ""}
-                        onChange={(e) =>
-                          handleAmountChange(head.id, e.target.value)
-                        }
-                        className="w-32 border border-gray-200 rounded-md p-2 focus:ring-2 focus:ring-blue-500 outline-none font-mono"
-                      />
-                    </td>
-                    <td className="px-6 py-4">
-                      {/* 3. Logic for Calculation Type (Will need a state handler too) */}
-                      <select
-                        className="bg-transparent border-none text-gray-600 focus:ring-0 cursor-pointer"
-                        value={head.calculationType || "Fixed Amount"}
-                        onChange={(e) =>
-                          handleCalcTypeChange(head.id, e.target.value)
-                        }
-                      >
-                        <option value="FIXED">Fixed Amount</option>
-                        <option value="PERCENTAGE">% of Maintenance</option>
-                        <option value="SQFT">Per Sq. Ft.</option>
-                      </select>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div className="space-y-6 p-6">
+              {groupedAccounts.map((group) => (
+                <section
+                  key={group.value}
+                  className="overflow-hidden rounded-2xl border border-gray-200"
+                >
+                  <div className="flex items-center justify-between border-b border-gray-100 bg-gray-50 px-5 py-4">
+                    <div>
+                      <h4 className="text-sm font-bold uppercase tracking-wide text-gray-700">
+                        {group.label}
+                      </h4>
+                      <p className="text-xs text-gray-500">
+                        {group.accounts.length} account
+                        {group.accounts.length === 1 ? "" : "s"}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-sm">
+                      <thead className="bg-white text-gray-600 border-b">
+                        <tr>
+                          <th className="px-5 py-3">Account</th>
+                          <th className="px-5 py-3">Financial Head</th>
+                          <th className="px-5 py-3 text-center">Status</th>
+                          <th className="px-5 py-3 text-center">In Maintenance Bill</th>
+                          <th className="px-5 py-3 text-center">Interest</th>
+                          <th className="px-5 py-3">Default Amount (₹)</th>
+                          <th className="px-5 py-3">Calculation Type</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {group.accounts.map((account) => (
+                          <tr
+                            key={account.id}
+                            className="transition-colors hover:bg-blue-50/30"
+                          >
+                            <td className="px-5 py-4">
+                              <div className="space-y-2">
+                                <input
+                                  type="text"
+                                  value={account.accountName}
+                                  onChange={(e) =>
+                                    handleFieldChange(
+                                      account.id,
+                                      "accountName",
+                                      e.target.value,
+                                    )
+                                  }
+                                  className="w-full rounded-md border border-gray-200 p-2 font-medium text-gray-700 outline-none focus:ring-2 focus:ring-blue-500"
+                                  placeholder="Account name"
+                                />
+                                {account.globalLedgerHeadId && (
+                                  <span className="inline-flex rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-500">
+                                    Default account
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="px-5 py-4">
+                              <select
+                                value={account.financialHead}
+                                onChange={(e) =>
+                                  handleFieldChange(
+                                    account.id,
+                                    "financialHead",
+                                    e.target.value as FinancialHead,
+                                  )
+                                }
+                                className="w-full rounded-md border border-gray-200 bg-white p-2 text-gray-700 outline-none focus:ring-2 focus:ring-blue-500"
+                              >
+                                {financialHeadOptions.map((option) => (
+                                  <option key={option.value} value={option.value}>
+                                    {option.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </td>
+                            <td className="px-5 py-4 text-center">
+                              <label className="relative inline-flex cursor-pointer items-center">
+                                <input
+                                  type="checkbox"
+                                  className="peer sr-only"
+                                  checked={account.isActive}
+                                  onChange={() =>
+                                    handleFieldChange(
+                                      account.id,
+                                      "isActive",
+                                      !account.isActive,
+                                    )
+                                  }
+                                />
+                                <div className="peer h-6 w-11 rounded-full bg-gray-200 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:border after:border-gray-300 after:bg-white after:transition-all after:content-[''] peer-checked:bg-blue-600 peer-checked:after:translate-x-full peer-checked:after:border-white"></div>
+                              </label>
+                            </td>
+                            <td className="px-5 py-4 text-center">
+                              <label className="relative inline-flex cursor-pointer items-center">
+                                <input
+                                  type="checkbox"
+                                  className="peer sr-only"
+                                  checked={account.includeInMaintenanceBill}
+                                  onChange={() =>
+                                    handleFieldChange(
+                                      account.id,
+                                      "includeInMaintenanceBill",
+                                      !account.includeInMaintenanceBill,
+                                    )
+                                  }
+                                />
+                                <div className="peer h-6 w-11 rounded-full bg-gray-200 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:border after:border-gray-300 after:bg-white after:transition-all after:content-[''] peer-checked:bg-emerald-600 peer-checked:after:translate-x-full peer-checked:after:border-white"></div>
+                              </label>
+                            </td>
+                            <td className="px-5 py-4 text-center">
+                              <label className="relative inline-flex cursor-pointer items-center">
+                                <input
+                                  type="checkbox"
+                                  className="peer sr-only"
+                                  checked={account.interestApplicable}
+                                  onChange={() =>
+                                    handleFieldChange(
+                                      account.id,
+                                      "interestApplicable",
+                                      !account.interestApplicable,
+                                    )
+                                  }
+                                />
+                                <div className="peer h-6 w-11 rounded-full bg-gray-200 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:border after:border-gray-300 after:bg-white after:transition-all after:content-[''] peer-checked:bg-amber-500 peer-checked:after:translate-x-full peer-checked:after:border-white"></div>
+                              </label>
+                            </td>
+                            <td className="px-5 py-4">
+                              <input
+                                type="number"
+                                placeholder="0.00"
+                                value={account.defaultAmount}
+                                onChange={(e) =>
+                                  handleFieldChange(
+                                    account.id,
+                                    "defaultAmount",
+                                    e.target.value,
+                                  )
+                                }
+                                className="w-36 rounded-md border border-gray-200 p-2 font-mono outline-none focus:ring-2 focus:ring-blue-500"
+                              />
+                            </td>
+                            <td className="px-5 py-4">
+                              <select
+                                value={account.calculationType}
+                                onChange={(e) =>
+                                  handleFieldChange(
+                                    account.id,
+                                    "calculationType",
+                                    e.target.value as CalculationType,
+                                  )
+                                }
+                                className="w-full rounded-md border border-gray-200 bg-white p-2 text-gray-700 outline-none focus:ring-2 focus:ring-blue-500"
+                              >
+                                {calculationTypeOptions.map((option) => (
+                                  <option key={option.value} value={option.value}>
+                                    {option.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              ))}
+
+              {groupedAccounts.length === 0 && (
+                <div className="rounded-2xl border border-dashed border-gray-300 p-10 text-center text-sm text-gray-500">
+                  No accounts yet. Add one to get started.
+                </div>
+              )}
+            </div>
           </div>
         )}
 
         {activeSubTab === "Interest & Frequency" && (
-          <div className="p-8 max-w-3xl">
-            <h3 className="text-xl font-bold text-gray-800 mb-6">
+          <div className="max-w-3xl p-8">
+            <h3 className="mb-6 text-xl font-bold text-gray-800">
               Billing Configuration
             </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-              <div className="space-y-4">
-                <label className="block">
-                  <span className="text-sm font-semibold text-gray-700">
-                    Billing Frequency
-                  </span>
-                  <select className="mt-1 block w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-blue-500 outline-none">
-                    <option>Monthly</option>
-                    <option>Quarterly (April, July, Oct, Jan)</option>
-                    <option>Bi-Annual</option>
-                  </select>
-                </label>
+            <div className="space-y-5">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-[1.5fr_120px_1fr] md:items-center">
+                <span className="text-sm font-semibold text-gray-700">
+                  Fixed Interest
+                </span>
+                <select
+                  value={localBillingConfig.fixedInterestEnabled ? "YES" : "NO"}
+                  onChange={(e) =>
+                    handleBillingFieldChange(
+                      "fixedInterestEnabled",
+                      e.target.value === "YES",
+                    )
+                  }
+                  className="rounded-lg border border-gray-300 p-3 outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="NO">No</option>
+                  <option value="YES">Yes</option>
+                </select>
+                <input
+                  type="number"
+                  step="0.001"
+                  value={localBillingConfig.fixedInterestValue}
+                  onChange={(e) =>
+                    handleBillingFieldChange("fixedInterestValue", e.target.value)
+                  }
+                  className="rounded-lg border border-gray-300 p-3 outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Fixed interest value"
+                />
+              </div>
 
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <label className="block">
                   <span className="text-sm font-semibold text-gray-700">
-                    Grace Period (Days)
+                    Interest Rebate in Value
                   </span>
                   <input
                     type="number"
-                    defaultValue={15}
-                    className="mt-1 block w-full border border-gray-300 rounded-lg p-3"
+                    step="0.001"
+                    value={localBillingConfig.interestRebateValue}
+                    onChange={(e) =>
+                      handleBillingFieldChange(
+                        "interestRebateValue",
+                        e.target.value,
+                      )
+                    }
+                    className="mt-1 block w-full rounded-lg border border-gray-300 p-3 outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Rebate value"
                   />
-                  <span className="text-xs text-gray-400 mt-1 block">
-                    Days allowed after bill date before interest applies.
-                  </span>
-                </label>
-              </div>
-
-              <div className="space-y-4">
-                <label className="block">
-                  <span className="text-sm font-semibold text-gray-700">
-                    Interest Rate (% Per Annum)
-                  </span>
-                  <div className="relative">
-                    <input
-                      type="number"
-                      defaultValue={21}
-                      className="mt-1 block w-full border border-gray-300 rounded-lg p-3 pr-10"
-                    />
-                    <span className="absolute right-4 top-4 text-gray-400">
-                      %
-                    </span>
-                  </div>
                 </label>
 
                 <label className="block">
                   <span className="text-sm font-semibold text-gray-700">
-                    Interest Calculation
+                    Interest Rebate in Time (Grace Period)
                   </span>
-                  <select className="mt-1 block w-full border border-gray-300 rounded-lg p-3">
-                    <option>Simple Interest</option>
-                    <option>Compound Interest</option>
-                  </select>
+                  <input
+                    type="number"
+                    min={0}
+                    value={localBillingConfig.interestRebateGraceDays}
+                    onChange={(e) =>
+                      handleBillingFieldChange(
+                        "interestRebateGraceDays",
+                        Number(e.target.value) || 0,
+                      )
+                    }
+                    className="mt-1 block w-full rounded-lg border border-gray-300 p-3 outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Grace period in days"
+                  />
                 </label>
               </div>
+
+              <label className="block">
+                <span className="text-sm font-semibold text-gray-700">
+                  Simple Interest: Rate of Interest per Month
+                </span>
+                <input
+                  type="number"
+                  step="0.001"
+                  value={localBillingConfig.simpleInterestRateMonthly}
+                  onChange={(e) =>
+                    handleBillingFieldChange(
+                      "simpleInterestRateMonthly",
+                      e.target.value,
+                    )
+                  }
+                  className="mt-1 block w-full rounded-lg border border-gray-300 p-3 outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="0.175"
+                />
+              </label>
+
+              <label className="block">
+                <span className="text-sm font-semibold text-gray-700">
+                  Bill Date
+                </span>
+                <input
+                  type="number"
+                  min={1}
+                  max={31}
+                  value={localBillingConfig.billGenerationDay}
+                  onChange={(e) =>
+                    handleBillingFieldChange(
+                      "billGenerationDay",
+                      Number(e.target.value) || 1,
+                    )
+                  }
+                  className="mt-1 block w-full rounded-lg border border-gray-300 p-3 outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="1 to 31"
+                />
+                <span className="mt-1 block text-xs text-gray-400">
+                  The bill will be generated on this date of every billing cycle.
+                </span>
+              </label>
+
+              <label className="block">
+                <span className="text-sm font-semibold text-gray-700">
+                  Bill Frequency
+                </span>
+                <select
+                  value={localBillingConfig.billFrequency}
+                  onChange={(e) =>
+                    handleBillingFieldChange(
+                      "billFrequency",
+                      e.target.value as BillFrequency,
+                    )
+                  }
+                  className="mt-1 block w-full rounded-lg border border-gray-300 p-3 outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  {billFrequencyOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
           </div>
         )}
 
-        <div className="p-6 bg-gray-50 border-t flex justify-end">
+        <div className="flex justify-end border-t bg-gray-50 p-6">
           <button
-            onClick={onSave}
+            onClick={
+              activeSubTab === "Accounts" ? onSave : onSaveBillingConfiguration
+            }
             disabled={isSaving}
-            className={`bg-blue-600 hover:bg-blue-700 text-white px-8 py-2 rounded-lg font-bold shadow-md transition-all 
-    ${isSaving ? "opacity-50 cursor-not-allowed" : ""}`}
+            className={`rounded-lg bg-blue-600 px-8 py-2 font-bold text-white shadow-md transition-all hover:bg-blue-700 ${
+              isSaving ? "cursor-not-allowed opacity-50" : ""
+            }`}
           >
-            {isSaving ? "Saving..." : "Save Master Settings"}
+            {isSaving
+              ? "Saving..."
+              : activeSubTab === "Accounts"
+                ? "Save Master Settings"
+                : "Save Billing Configuration"}
           </button>
         </div>
       </div>

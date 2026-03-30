@@ -1,9 +1,15 @@
 import Link from "next/link";
 import { PrismaClient } from "@prisma/client";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
+import { deleteSociety } from "@/app/actions/societyActions";
 
 const prisma = new PrismaClient();
 
 export default async function DashboardPage() {
+  const session = await getServerSession(authOptions);
+  const isSuperAdmin = session?.user?.role === "SUPERADMIN";
+
   // Fetch societies directly from Postgres
   const societies = await prisma.society.findMany({
     orderBy: { createdAt: 'desc' }
@@ -13,12 +19,20 @@ export default async function DashboardPage() {
     <div className="p-8 max-w-6xl mx-auto">
       <div className="flex justify-between items-center mb-8">
         <h1 className="text-2xl font-bold text-gray-800">Registered Societies</h1>
-        <Link 
-          href="/dashboard/societies/create" 
-          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition"
-        >
-          + Add New Society
-        </Link>
+        <div className="flex items-center gap-3">
+          <Link
+            href="/dashboard/admin"
+            className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
+          >
+            Admin Users
+          </Link>
+          <Link 
+            href="/dashboard/societies/create" 
+            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition"
+          >
+            + Add New Society
+          </Link>
+        </div>
       </div>
 
       <div className="bg-white shadow-md rounded-lg overflow-hidden border border-gray-200">
@@ -52,7 +66,21 @@ export default async function DashboardPage() {
                   </td>
                   <td className="px-6 py-4 text-right space-x-3">
                     <button className="text-amber-600 hover:text-amber-700 text-sm font-medium">Modify</button>
-                    <button className="text-red-600 hover:text-red-700 text-sm font-medium">Delete</button>
+                    {isSuperAdmin ? (
+                      <form
+                        action={async () => {
+                          "use server";
+                          await deleteSociety(society.id);
+                        }}
+                        className="inline"
+                      >
+                        <button className="text-red-600 hover:text-red-700 text-sm font-medium">
+                          Delete
+                        </button>
+                      </form>
+                    ) : (
+                      <span className="text-sm font-medium text-gray-300">Delete</span>
+                    )}
                   </td>
                 </tr>
               ))

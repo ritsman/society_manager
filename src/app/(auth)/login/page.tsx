@@ -9,31 +9,27 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
 
-  const router = useRouter()
+  const router = useRouter();
 
-  const handleSubmit2 = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // We will wire this up to NextAuth in the next step
-    console.log("Attempting login with:", { email, password });
-  };
-const handleSubmit = async (e: React.FormEvent) => {
-  e.preventDefault();
-  
-  // Call NextAuth
-  const result = await signIn("credentials", {
-    email: email,       // Replace with your actual state variable
-    password: password, // Replace with your actual state variable
-    redirect: false,
-  });
+    setError("");
 
-  if (result?.error) {
-    setError(result.error);
-  } else {
-    // Success! Push them to the dashboard
+    const result = await signIn("credentials", {
+      email,
+      password,
+      redirect: false,
+    });
+
+    if (result?.error) {
+      setError(result.error);
+      return;
+    }
+
     router.push("/dashboard");
-    router.refresh(); // Forces a refresh so the layout picks up the new session
-  }
-};
+    router.refresh();
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
       <div className="max-w-md w-full space-y-8 p-8 bg-white rounded-xl shadow-md border border-gray-100">
@@ -48,6 +44,11 @@ const handleSubmit = async (e: React.FormEvent) => {
         
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
           <div className="space-y-4">
+            {error ? (
+              <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                {error}
+              </div>
+            ) : null}
             <div>
               <label className="block text-sm font-medium text-gray-700">
                 Email address

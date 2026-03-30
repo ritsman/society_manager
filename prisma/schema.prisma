@@ -22,6 +22,33 @@ enum Role {
   USER           // Standard resident
 }
 
+enum FinancialHead {
+  CURRENT_ASSET
+  CURRENT_LIABILITY
+  FIXED_ASSET
+  INCOME
+  EXPENSE
+  CAPITAL
+  LOANS
+  SUNDRY_CREDITORS
+  SUNDRY_DEBTORS
+}
+
+enum AccountCalculationType {
+  FIXED
+  PERCENTAGE
+  SQFT
+}
+
+enum BillFrequency {
+  MONTHLY
+  BIMONTHLY
+  TRIMONTHLY
+  QUARTERLY
+  SEMESTER
+  YEARLY
+}
+
 // --- TABLES ---
 
 // 1. The Single Source of Truth for Logins
@@ -43,17 +70,43 @@ model User {
 
 // 2. The Tenant (The Housing Society)
 model Society {
-  id             String          @id @default(cuid())
-  name           String
-  address        String?
-  createdAt      DateTime        @default(now())
+  id                        String        @id @default(cuid())
+  name                      String
+  address                   String?
+  registrationNumber        String?
+  chairman                  String?
+  secretary                 String?
+  treasurer                 String?
+  auditor                   String?
+  fixedInterestEnabled      Boolean       @default(false)
+  fixedInterestValue        Decimal       @default(0) @db.Decimal(12, 3)
+  interestRebateValue       Decimal       @default(0) @db.Decimal(12, 3)
+  interestRebateGraceDays   Int           @default(0)
+  simpleInterestRateMonthly Decimal       @default(0.175) @db.Decimal(12, 3)
+  billGenerationDay         Int           @default(1)
+  billFrequency             BillFrequency @default(MONTHLY)
+  createdAt                 DateTime      @default(now())
   
   managers       SocietyAccess[]
+  flats          Flat[]
   members        MemberProfile[]
   ledgerConfigs SocietyLedgerConfig[]
   bills         Bill[]
   transactions   Transaction[]
   receipts       Receipt[]
+}
+
+model Flat {
+  id         String          @id @default(cuid())
+  societyId   String
+  flatNo      String
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  society     Society        @relation(fields: [societyId], references: [id], onDelete: Cascade)
+  owners      MemberProfile[]
+
+  @@unique([societyId, flatNo])
 }
 
 // 3. The Access Link (Who manages which society?)
@@ -71,6 +124,7 @@ model SocietyAccess {
 // 4. The Resident Profile (Ledger data, flat numbers, etc.)
 model MemberProfile {
   id              String   @id @default(cuid())
+  flatId          String?
   flatNo          String
   salutation      String?  // e.g., Mr., Mrs., Dr.
   firstName       String
@@ -79,6 +133,9 @@ model MemberProfile {
   email           String?
   areaSqFt        Float?
   memberSince     DateTime @default(now())
+  ownershipStartDate DateTime @default(now())
+  ownershipEndDate DateTime?
+  isActive        Boolean  @default(true)
   
   // Financials
   openingBalance  Decimal  @default(0) @db.Decimal(12, 2)
@@ -94,6 +151,7 @@ model MemberProfile {
   // Relationship to Society
   societyId       String
   society         Society  @relation(fields: [societyId], references: [id], onDelete: Cascade)
+  flat            Flat?    @relation(fields: [flatId], references: [id], onDelete: Cascade)
 
   
 // FIX: Add this field to link back to the User model
@@ -101,16 +159,15 @@ model MemberProfile {
   user            User?    @relation(fields: [userId], references: [id])
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
-  
-  @@unique([societyId, flatNo]) // Prevents duplicate flats in the same society
 }
 
 //master ledger--universal for all societies
 model GlobalLedgerHead {
-  id          String   @id @default(cuid())
-  name        String   @unique // e.g., "Water Charges", "Elevator Maintenance"
-  category    String   // e.g., "Income", "Expense", "Asset", "Liability"
-  description String?
+  id                     String                 @id @default(cuid())
+  name                   String                 @unique // e.g., "Water Charges", "Elevator Maintenance"
+  financialHead          FinancialHead          @default(INCOME)
+  defaultCalculationType AccountCalculationType @default(FIXED)
+  description            String?
   
   // Relation to the society-specific configurations
   societyConfigs SocietyLedgerConfig[]
@@ -118,15 +175,21 @@ model GlobalLedgerHead {
 
 // Society-specific toggle
 model SocietyLedgerConfig {
-  id                 String   @id @default(cuid())
+  id                 String                 @id @default(cuid())
   societyId          String
-  globalLedgerHeadId String
-  isActive           Boolean  @default(false)
-  defaultAmount      Decimal  @default(0) @db.Decimal(12, 2)
-  society          Society          @relation(fields: [societyId], references: [id], onDelete: Cascade)
-  globalLedgerHead GlobalLedgerHead @relation(fields: [globalLedgerHeadId], references: [id], onDelete: Cascade)
+  globalLedgerHeadId String?
+  accountName        String
+  financialHead      FinancialHead
+  calculationType    AccountCalculationType @default(FIXED)
+  isActive           Boolean                @default(false)
+  includeInMaintenanceBill Boolean          @default(false)
+  interestApplicable Boolean                @default(false)
+  defaultAmount      Decimal                @default(0) @db.Decimal(12, 2)
+  society            Society                @relation(fields: [societyId], references: [id], onDelete: Cascade)
+  globalLedgerHead   GlobalLedgerHead?      @relation(fields: [globalLedgerHeadId], references: [id], onDelete: Cascade)
 
   @@unique([societyId, globalLedgerHeadId])
+  @@unique([societyId, accountName])
 }
 
 // --- 1. BILLING SYSTEM ---
@@ -136,13 +199,19 @@ model Bill {
   billNumber     String      // e.g., SOC/2026/FEB/101
   billDate       DateTime    @default(now())
   dueDate        DateTime
+  billingYear    Int
+  billingMonth   Int
   
   societyId      String
   society        Society     @relation(fields: [societyId], references: [id], onDelete: Cascade)
   memberId       String
   member         MemberProfile @relation(fields: [memberId], references: [id], onDelete: Cascade)
   
+  previousAmount Decimal     @default(0) @db.Decimal(12, 2)
+  previousInterest Decimal   @default(0) @db.Decimal(12, 2)
   totalAmount    Decimal     @db.Decimal(12, 2)
+  currentInterest Decimal    @default(0) @db.Decimal(12, 2)
+  totalOutstanding Decimal   @default(0) @db.Decimal(12, 2)
   paidAmount     Decimal     @default(0) @db.Decimal(12, 2)
   status         BillStatus  @default(UNPAID)
 
@@ -150,7 +219,9 @@ model Bill {
   transaction    Transaction? // Optional: Link to the CHARGE transaction
 
   @@unique([societyId, billNumber])
+  @@unique([societyId, memberId, billingYear, billingMonth])
   @@index([societyId, billDate])
+  @@index([societyId, billingYear, billingMonth])
   @@index([memberId])
 }
 
@@ -173,6 +244,7 @@ model Receipt {
   
   referenceNo    String?     // Cheque No or UPI Ref
   bankName       String?
+  remarks        String?
   receiptDate    DateTime    @default(now())
   
   societyId      String

@@ -9,10 +9,33 @@ export default function CreateSocietyPage() {
 
     const name = formData.get("name") as string;
     const address = formData.get("address") as string;
-   
+    const registrationNumber = formData.get("registrationNumber") as string;
+    const chairman = formData.get("chairman") as string;
+    const secretary = formData.get("secretary") as string;
+    const treasurer = formData.get("treasurer") as string;
+    const auditor = formData.get("auditor") as string;
+    const globalHeads = await prisma.globalLedgerHead.findMany();
 
     await prisma.society.create({
-      data: { name, address},
+      data: {
+        name,
+        address,
+        registrationNumber: registrationNumber || null,
+        chairman: chairman || null,
+        secretary: secretary || null,
+        treasurer: treasurer || null,
+        auditor: auditor || null,
+        ledgerConfigs: {
+          create: globalHeads.map((head) => ({
+            globalLedgerHeadId: head.id,
+            accountName: head.name,
+            financialHead: head.financialHead,
+            calculationType: head.defaultCalculationType,
+            includeInMaintenanceBill: false,
+            interestApplicable: false,
+          })),
+        },
+      },
     });
 
     redirect("/dashboard"); // Take us back to the table
@@ -32,7 +55,26 @@ export default function CreateSocietyPage() {
         </div>
         <div>
           <label className="block text-sm font-medium text-gray-700">Registration Number</label>
-          <input name="regNum" className="mt-1 block w-full border rounded-md p-2" />
+          <input
+            name="registrationNumber"
+            className="mt-1 block w-full border rounded-md p-2"
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700">Chairman</label>
+          <input name="chairman" className="mt-1 block w-full border rounded-md p-2" />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700">Secretary</label>
+          <input name="secretary" className="mt-1 block w-full border rounded-md p-2" />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700">Treasurer</label>
+          <input name="treasurer" className="mt-1 block w-full border rounded-md p-2" />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700">Auditor</label>
+          <input name="auditor" className="mt-1 block w-full border rounded-md p-2" />
         </div>
         <div className="flex gap-4">
           <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded">Save Society</button>

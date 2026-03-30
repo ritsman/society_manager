@@ -1,8 +1,23 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f3f6fb;
+  --foreground: #0f172a;
+  --card: #ffffff;
+  --card-muted: #f8fafc;
+  --border: #dbe3ef;
+  --muted: #64748b;
+  --muted-strong: #334155;
+}
+
+html[data-theme="dark"] {
+  --background: #09111f;
+  --foreground: #e5eefc;
+  --card: #111b2e;
+  --card-muted: #172338;
+  --border: #24324a;
+  --muted: #9fb0cb;
+  --muted-strong: #d9e5f7;
 }
 
 @theme inline {
@@ -12,15 +27,89 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* {
+  box-sizing: border-box;
+}
+
+html {
+  color-scheme: light;
+}
+
+html[data-theme="dark"] {
+  color-scheme: dark;
 }
 
 body {
-  background: var(--background);
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at top, rgba(59, 130, 246, 0.1), transparent 35%),
+    linear-gradient(180deg, var(--background), color-mix(in srgb, var(--background) 82%, black 18%));
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), sans-serif;
+  transition:
+    background-color 180ms ease,
+    color 180ms ease,
+    border-color 180ms ease;
+}
+
+a,
+button,
+input,
+select,
+textarea {
+  transition:
+    background-color 180ms ease,
+    color 180ms ease,
+    border-color 180ms ease,
+    box-shadow 180ms ease;
+}
+
+html[data-theme="dark"] :where(.bg-white) {
+  background-color: var(--card) !important;
+}
+
+html[data-theme="dark"] :where(.bg-gray-50, .bg-gray-50\/50, .hover\:bg-gray-50:hover) {
+  background-color: var(--card-muted) !important;
+}
+
+html[data-theme="dark"] :where(.bg-gray-100) {
+  background-color: #22324a !important;
+}
+
+html[data-theme="dark"] :where(.border, .border-gray-100, .border-gray-200, .border-gray-300) {
+  border-color: var(--border) !important;
+}
+
+html[data-theme="dark"] :where(.border-dashed) {
+  border-color: #35506f !important;
+}
+
+html[data-theme="dark"] :where(.text-gray-400) {
+  color: #8ea3c2 !important;
+}
+
+html[data-theme="dark"] :where(.text-gray-500, .text-gray-600) {
+  color: var(--muted) !important;
+}
+
+html[data-theme="dark"] :where(.text-gray-700, .text-gray-800, .text-gray-900) {
+  color: var(--muted-strong) !important;
+}
+
+html[data-theme="dark"] :where(input, select, textarea) {
+  background-color: #0d1728;
+  color: var(--foreground);
+  border-color: var(--border);
+}
+
+html[data-theme="dark"] :where(input::placeholder, textarea::placeholder) {
+  color: #7d92b0;
+}
+
+html[data-theme="dark"] :where(table thead) {
+  background-color: var(--card-muted) !important;
+}
+
+html[data-theme="dark"] :where(.shadow, .shadow-md, .shadow-sm) {
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25) !important;
 }

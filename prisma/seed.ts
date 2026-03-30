@@ -17,23 +17,33 @@ import bcrypt from 'bcryptjs'
 const prisma = new PrismaClient({})
 
 async function main() {
-  // Hash the password "admin123"
-  const hashedPassword = await bcrypt.hash('admin123', 10)
+  const hashedPassword = await bcrypt.hash('admin@123', 10)
 
-  // upsert ensures we don't accidentally create duplicates if you run this twice
   const superAdmin = await prisma.user.upsert({
-    where: { email: 'admin@societymanager.com' },
+    where: { email: 'superadmin@societymanager.com' },
     update: {},
     create: {
-      email: 'admin@societymanager.com',
+      email: 'superadmin@societymanager.com',
       name: 'Super Administrator',
       passwordHash: hashedPassword,
       role: 'SUPERADMIN',
     },
   })
 
+  const admin = await prisma.user.upsert({
+    where: { email: 'admin@societymanager.com' },
+    update: {},
+    create: {
+      email: 'admin@societymanager.com',
+      name: 'Administrator',
+      passwordHash: hashedPassword,
+      role: 'ADMIN',
+    },
+  })
+
   console.log('Database seeded successfully!')
   console.log('Superadmin created:', superAdmin.email)
+  console.log('Admin created:', admin.email)
 }
 
 main()
