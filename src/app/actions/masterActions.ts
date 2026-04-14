@@ -64,14 +64,6 @@ export async function saveMasterSettings(
           defaultAmount: config.defaultAmount,
         };
 
-        if (config.id && !config.id.startsWith("new-")) {
-          await tx.societyLedgerConfig.update({
-            where: { id: config.id },
-            data,
-          });
-          continue;
-        }
-
         if (config.globalLedgerHeadId) {
           await tx.societyLedgerConfig.upsert({
             where: {
@@ -90,9 +82,35 @@ export async function saveMasterSettings(
           continue;
         }
 
-        await tx.societyLedgerConfig.create({
-          data: {
+        if (
+          config.id &&
+          !config.id.startsWith("new-") &&
+          !config.id.startsWith("template-")
+        ) {
+          const updated = await tx.societyLedgerConfig.updateMany({
+            where: { id: config.id, societyId },
+            data,
+          });
+
+          if (updated.count > 0) {
+            continue;
+          }
+        }
+
+        await tx.societyLedgerConfig.upsert({
+          where: {
+            societyId_accountName: {
+              societyId,
+              accountName,
+            },
+          },
+          update: {
+            ...data,
+            globalLedgerHeadId: null,
+          },
+          create: {
             societyId,
+            globalLedgerHeadId: null,
             ...data,
           },
         });
