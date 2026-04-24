@@ -1,6 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import { notFound } from "next/navigation";
-import PrintOnLoad from "@/components/PrintOnLoad";
+import PrintPreviewActions from "@/components/PrintPreviewActions";
 
 const prisma = new PrismaClient();
 
@@ -46,6 +46,12 @@ function getDefaultFromDate() {
   return new Date(startYear, 3, 1);
 }
 
+function getDefaultToDate() {
+  const now = new Date();
+  const startYear = now.getMonth() + 1 >= 4 ? now.getFullYear() : now.getFullYear() - 1;
+  return new Date(startYear + 1, 2, 31);
+}
+
 function getEndOfDay(date: Date) {
   const result = new Date(date);
   result.setHours(23, 59, 59, 999);
@@ -60,7 +66,7 @@ export default async function PrintMemberLedgerPage({
   const { fromDate, toDate } = await searchParams;
 
   const from = parseDateOnly(fromDate, getDefaultFromDate());
-  const to = getEndOfDay(parseDateOnly(toDate, new Date()));
+  const to = getEndOfDay(parseDateOnly(toDate, getDefaultToDate()));
 
   if (from > to) {
     notFound();
@@ -201,7 +207,6 @@ export default async function PrintMemberLedgerPage({
 
   return (
     <div className="bg-white text-black">
-      <PrintOnLoad />
       <style>{`
         @page {
           size: A4 portrait;
@@ -220,6 +225,8 @@ export default async function PrintMemberLedgerPage({
       `}</style>
 
       <section className="ledger-page">
+        <PrintPreviewActions />
+
         <div className="mb-6 border-b border-gray-300 pb-4">
           <div className="flex items-start justify-between gap-6">
             <div>

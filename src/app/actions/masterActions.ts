@@ -42,6 +42,12 @@ type BillingConfigurationInput = {
     | "YEARLY";
 };
 
+type StandardRateInput = {
+  flatNo: string;
+  societyLedgerConfigId: string;
+  amount: number;
+};
+
 export async function saveMasterSettings(
   societyId: string, 
   configs: MasterAccountInput[]
@@ -159,6 +165,49 @@ export async function saveBillingConfiguration(
     return { success: true };
   } catch (error: unknown) {
     console.error("Failed to save billing configuration:", error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown error",
+    };
+  }
+}
+
+export async function saveStandardRates(
+  societyId: string,
+  rates: StandardRateInput[],
+) {
+  try {
+    const validRates = rates.filter(
+      (rate) => rate.flatNo.trim() && rate.societyLedgerConfigId.trim(),
+    );
+    const configIds = [...new Set(validRates.map((rate) => rate.societyLedgerConfigId))];
+
+    await prisma.$transaction(async (tx) => {
+      if (configIds.length > 0) {
+        await tx.flatStandardRate.deleteMany({
+          where: {
+            societyId,
+            societyLedgerConfigId: { in: configIds },
+          },
+        });
+      }
+
+      for (const rate of validRates) {
+        await tx.flatStandardRate.create({
+          data: {
+            societyId,
+            flatNo: rate.flatNo.trim(),
+            societyLedgerConfigId: rate.societyLedgerConfigId,
+            amount: rate.amount,
+          },
+        });
+      }
+    });
+
+    revalidatePath(`/dashboard/societies/${societyId}`);
+    return { success: true };
+  } catch (error: unknown) {
+    console.error("Failed to save standard rates:", error);
     return {
       success: false,
       error: error instanceof Error ? error.message : "Unknown error",

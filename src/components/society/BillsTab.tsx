@@ -9,6 +9,7 @@ import {
 import {
   BillingPeriod,
   compareBillingPeriods,
+  getBillingCycleYear,
   getBillingPeriodsForYear,
   getCurrentBillingPeriod,
   getFrequencyMonthSpan,
@@ -67,6 +68,12 @@ type MaintenanceAccount = {
   interestApplicable: boolean;
 };
 
+type StandardRate = {
+  flatNo: string;
+  societyLedgerConfigId: string;
+  amount: number | string;
+};
+
 type BillGridRow = {
   memberId: string;
   flatNo: string;
@@ -117,6 +124,7 @@ export default function BillsTab({
   fixedInterestValue,
   simpleInterestRateMonthly,
   maintenanceAccounts,
+  standardRates,
 }: {
   societyId: string;
   userRole: UserRole;
@@ -129,6 +137,7 @@ export default function BillsTab({
   fixedInterestValue: number | string;
   simpleInterestRateMonthly: number | string;
   maintenanceAccounts: MaintenanceAccount[];
+  standardRates: StandardRate[];
 }) {
   const router = useRouter();
   const canManageBills = userRole === "SUPERADMIN" || userRole === "ADMIN";
@@ -160,40 +169,71 @@ export default function BillsTab({
     }
 
     const latestPeriod = savedPeriods[savedPeriods.length - 1];
-    const periodsForYear = getBillingPeriodsForYear(
+    const latestCycleYear = getBillingCycleYear(
       latestPeriod.billingYear,
+      latestPeriod.billingMonth,
+      billingFrequency,
+    );
+    const periodsForYear = getBillingPeriodsForYear(
+      latestCycleYear,
       billingFrequency,
     );
     const currentIndex = periodsForYear.findIndex(
-      (period) => period.billingMonth === latestPeriod.billingMonth,
+      (period) =>
+        period.billingYear === latestPeriod.billingYear &&
+        period.billingMonth === latestPeriod.billingMonth,
     );
 
     if (currentIndex >= 0 && currentIndex < periodsForYear.length - 1) {
       return periodsForYear[currentIndex + 1];
     }
 
-    return getBillingPeriodsForYear(latestPeriod.billingYear + 1, billingFrequency)[0];
+    return getBillingPeriodsForYear(latestCycleYear + 1, billingFrequency)[0];
   }, [billingFrequency, currentPeriod, savedPeriods]);
 
   const yearOptions = useMemo(() => {
     const years = new Set<number>([
-      currentPeriod.billingYear - 1,
-      currentPeriod.billingYear,
-      currentPeriod.billingYear + 1,
-      nextExpectedPeriod.billingYear,
-      ...savedPeriods.map((period) => period.billingYear),
+      getBillingCycleYear(currentPeriod.billingYear, currentPeriod.billingMonth, billingFrequency) - 1,
+      getBillingCycleYear(currentPeriod.billingYear, currentPeriod.billingMonth, billingFrequency),
+      getBillingCycleYear(currentPeriod.billingYear, currentPeriod.billingMonth, billingFrequency) + 1,
+      getBillingCycleYear(
+        nextExpectedPeriod.billingYear,
+        nextExpectedPeriod.billingMonth,
+        billingFrequency,
+      ),
+      ...savedPeriods.map((period) =>
+        getBillingCycleYear(period.billingYear, period.billingMonth, billingFrequency),
+      ),
     ]);
 
     return [...years].sort((a, b) => a - b);
-  }, [currentPeriod.billingYear, nextExpectedPeriod.billingYear, savedPeriods]);
+  }, [billingFrequency, currentPeriod, nextExpectedPeriod, savedPeriods]);
 
-  const [selectedYear, setSelectedYear] = useState(nextExpectedPeriod.billingYear);
+  const [selectedYear, setSelectedYear] = useState(
+    getBillingCycleYear(
+      nextExpectedPeriod.billingYear,
+      nextExpectedPeriod.billingMonth,
+      billingFrequency,
+    ),
+  );
   const [selectedMonth, setSelectedMonth] = useState(nextExpectedPeriod.billingMonth);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedRows, setSelectedRows] = useState<Record<string, boolean>>({});
   const [gridRows, setGridRows] = useState<Record<string, BillGridRow>>({});
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const standardRateMap = useMemo(() => {
+    const map = new Map<string, number>();
+
+    for (const rate of standardRates) {
+      map.set(
+        `${rate.flatNo}::${rate.societyLedgerConfigId}`,
+        parseMoney(rate.amount),
+      );
+    }
+
+    return map;
+  }, [standardRates]);
 
   const calculateSuggestedInterest = (
     carryForward: CarryForwardSummary,
@@ -396,7 +436,7 @@ export default function BillsTab({
         itemValues[account.id] = formatMoney(
           flatSavedItem
             ? parseMoney(flatSavedItem.amount)
-            : parseMoney(account.defaultAmount),
+            : standardRateMap.get(`${member.flatNo}::${account.id}`) ?? 0,
         );
       }
 
@@ -435,6 +475,7 @@ export default function BillsTab({
     savedBillsForSelectedPeriod,
     selectedPeriod,
     simpleInterestRateMonthly,
+    standardRateMap,
   ]);
 
   const filteredRows = useMemo(() => {

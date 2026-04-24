@@ -5,6 +5,7 @@ import MembersTab from "@/components/society/MembersTab";
 import MasterTab from "@/components/society/MasterTab";
 import BillsTab from "@/components/society/BillsTab";
 import CollectionTab from "@/components/society/CollectionTab";
+import ReportsTab from "@/components/society/ReportsTab";
 import SocietyProfileTab from "@/components/society/SocietyProfileTab";
 import { authOptions } from "@/lib/auth";
 
@@ -49,6 +50,7 @@ export default async function SocietyDetailsPage({ params, searchParams }: PageP
       ledgerConfigs: {
         include: {
           globalLedgerHead: true,
+          standardRates: true,
         },
         orderBy: [{ financialHead: "asc" }, { accountName: "asc" }],
       },
@@ -58,6 +60,9 @@ export default async function SocietyDetailsPage({ params, searchParams }: PageP
           member: {
             select: {
               flatNo: true,
+              salutation: true,
+              firstName: true,
+              lastName: true,
             },
           },
         },
@@ -67,6 +72,9 @@ export default async function SocietyDetailsPage({ params, searchParams }: PageP
           member: {
             select: {
               flatNo: true,
+              salutation: true,
+              firstName: true,
+              lastName: true,
             },
           },
         },
@@ -119,7 +127,7 @@ export default async function SocietyDetailsPage({ params, searchParams }: PageP
 
   const tabs = [
     "Profile", "Bills", "Collection", "Members", 
-    "Income & Expense", "Balance Sheet", "Master"
+    "Income & Expense", "Balance Sheet", "Reports", "Master"
   ];
 
   return (
@@ -208,6 +216,17 @@ export default async function SocietyDetailsPage({ params, searchParams }: PageP
                 ),
               ),
             )}
+            standardRates={JSON.parse(
+              JSON.stringify(
+                society.ledgerConfigs.flatMap((config) =>
+                  config.standardRates.map((rate) => ({
+                    flatNo: rate.flatNo,
+                    societyLedgerConfigId: rate.societyLedgerConfigId,
+                    amount: rate.amount,
+                  })),
+                ),
+              ),
+            )}
           />
         )}
 
@@ -231,6 +250,25 @@ export default async function SocietyDetailsPage({ params, searchParams }: PageP
           <MasterTab
             societyId={id}
             accounts={JSON.parse(JSON.stringify(masterAccounts))}
+            members={JSON.parse(
+              JSON.stringify(
+                society.members.map((member) => ({
+                  id: member.id,
+                  flatNo: member.flatNo,
+                })),
+              ),
+            )}
+            standardRates={JSON.parse(
+              JSON.stringify(
+                society.ledgerConfigs.flatMap((config) =>
+                  config.standardRates.map((rate) => ({
+                    flatNo: rate.flatNo,
+                    societyLedgerConfigId: rate.societyLedgerConfigId,
+                    amount: rate.amount,
+                  })),
+                ),
+              ),
+            )}
             billingConfig={JSON.parse(
               JSON.stringify({
                 fixedInterestEnabled: society.fixedInterestEnabled,
@@ -245,9 +283,70 @@ export default async function SocietyDetailsPage({ params, searchParams }: PageP
           />
         )}
 
+        {activeTab === "Reports" && (
+          <ReportsTab
+            societyId={id}
+            billingFrequency={society.billFrequency}
+            bills={JSON.parse(
+              JSON.stringify(
+                society.bills.map((bill) => ({
+                  id: bill.id,
+                  billNumber: bill.billNumber,
+                  billDate: bill.billDate,
+                  dueDate: bill.dueDate,
+                  billingYear: bill.billingYear,
+                  billingMonth: bill.billingMonth,
+                  memberId: bill.memberId,
+                  flatNo: bill.member.flatNo,
+                  memberName: [
+                    bill.member.salutation,
+                    bill.member.firstName,
+                    bill.member.lastName,
+                  ]
+                    .filter(Boolean)
+                    .join(" "),
+                  items: bill.items.map((item) => ({
+                    ledgerHeadName: item.ledgerHeadName,
+                    amount: item.amount,
+                  })),
+                  totalAmount: bill.totalAmount,
+                  previousAmount: bill.previousAmount,
+                  previousInterest: bill.previousInterest,
+                  currentInterest: bill.currentInterest,
+                  totalOutstanding: bill.totalOutstanding,
+                  status: bill.status,
+                })),
+              ),
+            )}
+            receipts={JSON.parse(
+              JSON.stringify(
+                society.receipts.map((receipt) => ({
+                  id: receipt.id,
+                  receiptNumber: receipt.receiptNumber,
+                  receiptDate: receipt.receiptDate,
+                  flatNo: receipt.member.flatNo,
+                  memberName: [
+                    receipt.member.salutation,
+                    receipt.member.firstName,
+                    receipt.member.lastName,
+                  ]
+                    .filter(Boolean)
+                    .join(" "),
+                  amount: receipt.amount,
+                  paymentMode: receipt.paymentMode,
+                  referenceNo: receipt.referenceNo,
+                  bankName: receipt.bankName,
+                  remarks: receipt.remarks,
+                })),
+              ),
+            )}
+          />
+        )}
+
         {activeTab !== "Profile" &&
           activeTab !== "Members" &&
           activeTab !== "Master" &&
+          activeTab !== "Reports" &&
           activeTab !== "Collection" &&
           activeTab !== "Bills" && (
           <div className="text-center py-20 bg-gray-50 rounded-lg border-2 border-dashed">

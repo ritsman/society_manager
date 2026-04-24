@@ -112,7 +112,7 @@ export default async function PrintCollectionSheetPage({
 
         .write-cell {
           height: 44px;
-          min-width: 110px;
+          min-width: 88px;
         }
       `}</style>
 
@@ -142,20 +142,22 @@ export default async function PrintCollectionSheetPage({
         <table className="w-full border-collapse text-xs">
           <thead>
             <tr className="bg-gray-100">
+              <th className="border border-gray-300 px-2 py-2 text-center">Sr No</th>
               <th className="border border-gray-300 px-2 py-2 text-left">Flat No</th>
-              <th className="border border-gray-300 px-2 py-2 text-left">Name</th>
-              <th className="border border-gray-300 px-2 py-2 text-right">Prev Amount</th>
-              <th className="border border-gray-300 px-2 py-2 text-right">Prev Interest</th>
-              <th className="border border-gray-300 px-2 py-2 text-right">Current Amount</th>
-              <th className="border border-gray-300 px-2 py-2 text-right">Current Interest</th>
-              <th className="border border-gray-300 px-2 py-2 text-right">Total Outstanding</th>
-              <th className="border border-gray-300 px-2 py-2 text-left">Amount Received</th>
+              <th className="border border-gray-300 px-2 py-2 text-left">Current Bill No</th>
+              <th className="border border-gray-300 px-2 py-2 text-left">Name of Flat Holder</th>
+              <th className="border border-gray-300 px-2 py-2 text-right">Bill Amt</th>
+              <th className="border border-gray-300 px-2 py-2 text-right">Arrears</th>
+              <th className="border border-gray-300 px-2 py-2 text-right">Interest</th>
+              <th className="border border-gray-300 px-2 py-2 text-right">Total Amount Due</th>
               <th className="border border-gray-300 px-2 py-2 text-left">Date</th>
+              <th className="border border-gray-300 px-2 py-2 text-left">Amt</th>
+              <th className="border border-gray-300 px-2 py-2 text-left">Mode/ID</th>
               <th className="border border-gray-300 px-2 py-2 text-left">Remarks</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((bill) => {
+            {rows.map((bill, index) => {
               const memberName = [
                 bill.member.salutation,
                 bill.member.firstName,
@@ -163,28 +165,34 @@ export default async function PrintCollectionSheetPage({
               ]
                 .filter(Boolean)
                 .join(" ");
+              const arrears = Number(bill.previousAmount);
+              const interest = Number(bill.previousInterest) + Number(bill.currentInterest);
 
               return (
                 <tr key={bill.id}>
+                  <td className="border border-gray-300 px-2 py-3 text-center font-semibold">
+                    {index + 1}
+                  </td>
                   <td className="border border-gray-300 px-2 py-3 font-semibold">
                     {bill.member.flatNo}
                   </td>
+                  <td className="border border-gray-300 px-2 py-3 font-mono">
+                    {bill.billNumber}
+                  </td>
                   <td className="border border-gray-300 px-2 py-3">{memberName}</td>
-                  <td className="border border-gray-300 px-2 py-3 text-right font-mono">
-                    {formatCurrency(Number(bill.previousAmount))}
-                  </td>
-                  <td className="border border-gray-300 px-2 py-3 text-right font-mono">
-                    {formatCurrency(Number(bill.previousInterest))}
-                  </td>
                   <td className="border border-gray-300 px-2 py-3 text-right font-mono">
                     {formatCurrency(Number(bill.totalAmount))}
                   </td>
                   <td className="border border-gray-300 px-2 py-3 text-right font-mono">
-                    {formatCurrency(Number(bill.currentInterest))}
+                    {formatCurrency(arrears)}
+                  </td>
+                  <td className="border border-gray-300 px-2 py-3 text-right font-mono">
+                    {formatCurrency(interest)}
                   </td>
                   <td className="border border-gray-300 px-2 py-3 text-right font-mono font-semibold">
                     {formatCurrency(Number(bill.totalOutstanding))}
                   </td>
+                  <td className="write-cell border border-gray-300 px-2 py-3" />
                   <td className="write-cell border border-gray-300 px-2 py-3" />
                   <td className="write-cell border border-gray-300 px-2 py-3" />
                   <td className="write-cell border border-gray-300 px-2 py-3" />
@@ -196,8 +204,8 @@ export default async function PrintCollectionSheetPage({
 
         <div className="mt-4 text-xs text-gray-600">
           <p>
-            This collection sheet is intended for manual door-to-door collection
-            and handwritten entry of received amounts, dates, and remarks.
+            This collection sheet is intended for manual collection and handwritten
+            entry of date, amount, mode or reference ID, and remarks after printing.
           </p>
         </div>
       </section>

@@ -91,6 +91,7 @@ model Society {
   flats          Flat[]
   members        MemberProfile[]
   ledgerConfigs SocietyLedgerConfig[]
+  standardRates FlatStandardRate[]
   bills         Bill[]
   transactions   Transaction[]
   receipts       Receipt[]
@@ -187,9 +188,27 @@ model SocietyLedgerConfig {
   defaultAmount      Decimal                @default(0) @db.Decimal(12, 2)
   society            Society                @relation(fields: [societyId], references: [id], onDelete: Cascade)
   globalLedgerHead   GlobalLedgerHead?      @relation(fields: [globalLedgerHeadId], references: [id], onDelete: Cascade)
+  standardRates      FlatStandardRate[]
 
   @@unique([societyId, globalLedgerHeadId])
   @@unique([societyId, accountName])
+}
+
+model FlatStandardRate {
+  id                   String             @id @default(cuid())
+  societyId            String
+  flatNo               String
+  societyLedgerConfigId String
+  amount               Decimal            @default(0) @db.Decimal(12, 2)
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  society              Society            @relation(fields: [societyId], references: [id], onDelete: Cascade)
+  ledgerConfig         SocietyLedgerConfig @relation(fields: [societyLedgerConfigId], references: [id], onDelete: Cascade)
+
+  @@unique([societyId, flatNo, societyLedgerConfigId])
+  @@index([societyId, flatNo])
+  @@index([societyLedgerConfigId])
 }
 
 // --- 1. BILLING SYSTEM ---

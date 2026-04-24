@@ -12,18 +12,16 @@ import {
   deleteSelectedMembers,
 } from "@/app/actions/memberActions";
 
-function currentDateValue() {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
 function financialYearStartValue() {
   const now = new Date();
   const year = now.getMonth() + 1 >= 4 ? now.getFullYear() : now.getFullYear() - 1;
   return `${year}-04-01`;
+}
+
+function financialYearEndValue() {
+  const now = new Date();
+  const startYear = now.getMonth() + 1 >= 4 ? now.getFullYear() : now.getFullYear() - 1;
+  return `${startYear + 1}-03-31`;
 }
 
 type Member = {
@@ -52,7 +50,7 @@ export default function MembersTab({
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [fromDate, setFromDate] = useState(financialYearStartValue());
-  const [toDate, setToDate] = useState(currentDateValue());
+  const [toDate, setToDate] = useState(financialYearEndValue());
   const [ownershipMemberId, setOwnershipMemberId] = useState<string | null>(null);
   const [ownershipForm, setOwnershipForm] = useState({
     salutation: "",

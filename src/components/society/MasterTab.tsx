@@ -4,9 +4,10 @@ import { useState } from "react";
 import {
   saveBillingConfiguration,
   saveMasterSettings,
+  saveStandardRates,
 } from "@/app/actions/masterActions";
 
-type MasterSubTab = "Accounts" | "Interest & Frequency";
+type MasterSubTab = "Accounts" | "Standard Rates" | "Interest & Frequency";
 type FinancialHead =
   | "CURRENT_ASSET"
   | "CURRENT_LIABILITY"
@@ -49,6 +50,17 @@ type BillingConfig = {
   billFrequency: BillFrequency;
 };
 
+type MemberRow = {
+  id: string;
+  flatNo: string;
+};
+
+type StandardRate = {
+  flatNo: string;
+  societyLedgerConfigId: string;
+  amount: number | string;
+};
+
 const financialHeadOptions: { value: FinancialHead; label: string }[] = [
   { value: "CURRENT_ASSET", label: "Current Asset" },
   { value: "CURRENT_LIABILITY", label: "Current Liability" },
@@ -79,15 +91,35 @@ const billFrequencyOptions: { value: BillFrequency; label: string }[] = [
 export default function MasterTab({
   societyId,
   accounts,
+  members,
+  standardRates,
   billingConfig,
 }: {
   societyId: string;
   accounts: SocietyAccount[];
+  members: MemberRow[];
+  standardRates: StandardRate[];
   billingConfig: BillingConfig;
 }) {
   const [activeSubTab, setActiveSubTab] = useState<MasterSubTab>("Accounts");
   const [localAccounts, setLocalAccounts] = useState(accounts);
   const [localBillingConfig, setLocalBillingConfig] = useState(billingConfig);
+  const [localStandardRates, setLocalStandardRates] = useState(() => {
+    const rows: Record<string, Record<string, string>> = {};
+
+    for (const member of members) {
+      rows[member.flatNo] = {};
+    }
+
+    for (const rate of standardRates) {
+      rows[rate.flatNo] = {
+        ...(rows[rate.flatNo] ?? {}),
+        [rate.societyLedgerConfigId]: String(rate.amount ?? 0),
+      };
+    }
+
+    return rows;
+  });
   const [isSaving, setIsSaving] = useState(false);
 
   const handleFieldChange = <K extends keyof SocietyAccount>(
@@ -180,18 +212,59 @@ export default function MasterTab({
     alert("Error saving: " + result.error);
   };
 
+  const updateStandardRate = (flatNo: string, accountId: string, value: string) => {
+    setLocalStandardRates((prev) => ({
+      ...prev,
+      [flatNo]: {
+        ...(prev[flatNo] ?? {}),
+        [accountId]: value,
+      },
+    }));
+  };
+
+  const onSaveStandardRates = async () => {
+    setIsSaving(true);
+
+    const result = await saveStandardRates(
+      societyId,
+      maintenanceRateAccounts.flatMap((account) =>
+        members.map((member) => ({
+          flatNo: member.flatNo,
+          societyLedgerConfigId: account.id,
+          amount: Number(localStandardRates[member.flatNo]?.[account.id] ?? 0) || 0,
+        })),
+      ),
+    );
+
+    setIsSaving(false);
+
+    if (result.success) {
+      alert("Standard rates saved successfully!");
+      return;
+    }
+
+    alert("Error saving: " + result.error);
+  };
+
   const groupedAccounts = financialHeadOptions
     .map((head) => ({
       ...head,
       accounts: localAccounts.filter((account) => account.financialHead === head.value),
     }))
     .filter((group) => group.accounts.length > 0);
+  const maintenanceRateAccounts = localAccounts.filter(
+    (account) =>
+      account.isActive &&
+      account.includeInMaintenanceBill &&
+      !account.id.startsWith("new-") &&
+      !account.id.startsWith("template-"),
+  );
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex space-x-1 rounded-xl bg-gray-100 p-1 w-fit">
-          {["Accounts", "Interest & Frequency"].map((tab) => (
+          {["Accounts", "Standard Rates", "Interest & Frequency"].map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveSubTab(tab as MasterSubTab)}
@@ -549,10 +622,72 @@ export default function MasterTab({
           </div>
         )}
 
+        {activeSubTab === "Standard Rates" && (
+          <div className="p-0">
+            <div className="border-b border-gray-100 bg-gray-50/50 p-6">
+              <h3 className="text-lg font-bold text-gray-800">Standard Rates</h3>
+              <p className="text-sm text-gray-500">
+                Save flat-wise values for maintenance bill heads. New bills will prefill from this table.
+              </p>
+            </div>
+
+            {maintenanceRateAccounts.length === 0 ? (
+              <div className="p-8 text-sm text-gray-500">
+                No active maintenance bill heads are available yet. In Accounts, mark the heads as active and include them in the maintenance bill, then save Accounts first.
+              </div>
+            ) : members.length === 0 ? (
+              <div className="p-8 text-sm text-gray-500">
+                No members found. Add members first to configure flat-wise standard rates.
+              </div>
+            ) : (
+              <div className="overflow-x-auto p-6">
+                <table className="w-full text-left text-sm">
+                  <thead className="border-b bg-gray-50 text-gray-600">
+                    <tr>
+                      <th className="px-5 py-3">Flat Number</th>
+                      {maintenanceRateAccounts.map((account) => (
+                        <th key={account.id} className="px-5 py-3">
+                          {account.accountName}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {members.map((member) => (
+                      <tr key={member.id} className="hover:bg-gray-50">
+                        <td className="px-5 py-4 font-semibold text-blue-700">
+                          {member.flatNo}
+                        </td>
+                        {maintenanceRateAccounts.map((account) => (
+                          <td key={account.id} className="px-5 py-4">
+                            <input
+                              type="number"
+                              step="0.01"
+                              value={localStandardRates[member.flatNo]?.[account.id] ?? "0"}
+                              onChange={(e) =>
+                                updateStandardRate(member.flatNo, account.id, e.target.value)
+                              }
+                              className="w-32 rounded-md border border-gray-200 p-2 font-mono outline-none focus:ring-2 focus:ring-blue-500"
+                            />
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="flex justify-end border-t bg-gray-50 p-6">
           <button
             onClick={
-              activeSubTab === "Accounts" ? onSave : onSaveBillingConfiguration
+              activeSubTab === "Accounts"
+                ? onSave
+                : activeSubTab === "Standard Rates"
+                  ? onSaveStandardRates
+                  : onSaveBillingConfiguration
             }
             disabled={isSaving}
             className={`rounded-lg bg-blue-600 px-8 py-2 font-bold text-white shadow-md transition-all hover:bg-blue-700 ${
@@ -563,7 +698,9 @@ export default function MasterTab({
               ? "Saving..."
               : activeSubTab === "Accounts"
                 ? "Save Master Settings"
-                : "Save Billing Configuration"}
+                : activeSubTab === "Standard Rates"
+                  ? "Save Standard Rates"
+                  : "Save Billing Configuration"}
           </button>
         </div>
       </div>
