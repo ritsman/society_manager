@@ -90,6 +90,7 @@ export default async function PrintBillsPage({
       where: {
         societyId,
         memberId: { in: memberIdsForHistory },
+        status: "ACTIVE",
         receiptDate: { lte: latestBillDate },
       },
       select: {

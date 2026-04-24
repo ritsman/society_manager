@@ -1,7 +1,12 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { saveCollections } from "@/app/actions/collectionActions";
+import {
+  deleteReceipt,
+  reverseReceipt,
+  saveCollections,
+  updateReceiptAmount,
+} from "@/app/actions/collectionActions";
 
 type UserRole = "SUPERADMIN" | "ADMIN" | "LOCAL_ADMIN" | "USER" | null;
 
@@ -15,6 +20,7 @@ type Member = {
 
 type Bill = {
   id: string;
+  billNumber: string;
   memberId: string;
   flatNo: string;
   billingYear: number;
@@ -26,9 +32,28 @@ type Bill = {
   totalOutstanding: number | string;
 };
 
+type ReceivableAccount = {
+  id: string;
+  accountName: string;
+};
+
+type Receipt = {
+  id: string;
+  receiptNumber: string;
+  receiptDate: string | Date;
+  flatNo: string;
+  memberName: string;
+  amount: number | string;
+  paymentMode: string;
+  bankName?: string | null;
+  remarks?: string | null;
+  status: "ACTIVE" | "REVERSED";
+  reversalReason?: string | null;
+};
+
 type CollectionRow = {
   memberId: string;
-  billId: string;
+  selectedBillId: string;
   flatNo: string;
   name: string;
   previousAmount: number;
@@ -38,10 +63,11 @@ type CollectionRow = {
   totalOutstanding: number;
   amountReceived: string;
   paymentMode: string;
+  receivableAccount: string;
   remarks: string;
 };
 
-type CollectionViewMode = "Grid Entry" | "Bulk Paste";
+type CollectionTabMode = "Grid Entry" | "Bulk Paste" | "Manage Receipts";
 
 type ParsedBulkRow = {
   rowNo: number;
@@ -49,9 +75,11 @@ type ParsedBulkRow = {
   amountReceived: number;
   receiptDate: string;
   paymentMode: string;
+  receivableAccount: string;
   remarks: string;
   memberId: string;
-  billId: string;
+  billId: string | null;
+  billReferenceLabel: string;
 };
 
 type RejectedBulkRow = {
@@ -79,6 +107,16 @@ function currentDateValue() {
   const month = String(now.getMonth() + 1).padStart(2, "0");
   const day = String(now.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function currentFinancialYearRange() {
+  const now = new Date();
+  const startYear = now.getMonth() + 1 >= 4 ? now.getFullYear() : now.getFullYear() - 1;
+
+  return {
+    from: `${startYear}-04-01`,
+    to: `${startYear + 1}-03-31`,
+  };
 }
 
 function normalizePaymentMode(mode: string) {
@@ -140,70 +178,108 @@ function parseExcelDateInput(rawValue: string) {
   return null;
 }
 
+function compareBillsDesc(a: Bill, b: Bill) {
+  if (a.billingYear !== b.billingYear) {
+    return b.billingYear - a.billingYear;
+  }
+
+  if (a.billingMonth !== b.billingMonth) {
+    return b.billingMonth - a.billingMonth;
+  }
+
+  return b.billNumber.localeCompare(a.billNumber);
+}
+
 export default function CollectionTab({
   societyId,
   userRole,
   members,
   bills,
+  receipts,
+  receivableAccounts,
 }: {
   societyId: string;
   userRole: UserRole;
   members: Member[];
   bills: Bill[];
+  receipts: Receipt[];
+  receivableAccounts: ReceivableAccount[];
 }) {
   const canManageCollections = userRole === "SUPERADMIN" || userRole === "ADMIN";
+  const defaultReceivableAccount = receivableAccounts[0]?.accountName ?? "Suspense Account";
+  const receivableAccountMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const account of receivableAccounts) {
+      map.set(account.accountName.trim().toLowerCase(), account.accountName);
+    }
+    return map;
+  }, [receivableAccounts]);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedRows, setSelectedRows] = useState<Record<string, boolean>>({});
   const [receiptDate, setReceiptDate] = useState(currentDateValue());
   const [isSaving, setIsSaving] = useState(false);
-  const [activeViewMode, setActiveViewMode] = useState<CollectionViewMode>("Grid Entry");
+  const defaultReceiptRange = useMemo(() => currentFinancialYearRange(), []);
+  const [activeViewMode, setActiveViewMode] = useState<CollectionTabMode>("Grid Entry");
   const [pasteData, setPasteData] = useState("");
   const [parsedBulkRows, setParsedBulkRows] = useState<ParsedBulkRow[]>([]);
   const [rejectedBulkRows, setRejectedBulkRows] = useState<RejectedBulkRow[]>([]);
+  const [reversingReceiptId, setReversingReceiptId] = useState<string | null>(null);
+  const [editingReceiptId, setEditingReceiptId] = useState<string | null>(null);
+  const [deletingReceiptId, setDeletingReceiptId] = useState<string | null>(null);
+  const [receiptFromDate, setReceiptFromDate] = useState(defaultReceiptRange.from);
+  const [receiptToDate, setReceiptToDate] = useState(defaultReceiptRange.to);
+  const [receiptSearchTerm, setReceiptSearchTerm] = useState("");
+
+  const billsByFlat = useMemo(() => {
+    const byFlat = new Map<string, Bill[]>();
+
+    for (const bill of bills) {
+      const existing = byFlat.get(bill.flatNo) ?? [];
+      existing.push(bill);
+      byFlat.set(bill.flatNo, existing);
+    }
+
+    for (const [flatNo, flatBills] of byFlat.entries()) {
+      byFlat.set(flatNo, [...flatBills].sort(compareBillsDesc));
+    }
+
+    return byFlat;
+  }, [bills]);
 
   const latestBillByMember = useMemo(() => {
     const byMember = new Map<string, Bill>();
 
-    for (const bill of bills) {
-      const existing = byMember.get(bill.flatNo);
-      if (
-        !existing ||
-        bill.billingYear > existing.billingYear ||
-        (bill.billingYear === existing.billingYear &&
-          bill.billingMonth > existing.billingMonth)
-      ) {
-        byMember.set(bill.flatNo, bill);
+    for (const member of members) {
+      const latestBill = billsByFlat.get(member.flatNo)?.[0];
+      if (latestBill) {
+        byMember.set(member.id, latestBill);
       }
     }
 
     return byMember;
-  }, [bills]);
+  }, [billsByFlat, members]);
+
+  const buildCollectionRow = (member: Member, bill: Bill | null): CollectionRow => ({
+    memberId: member.id,
+    selectedBillId: bill?.id ?? "",
+    flatNo: member.flatNo,
+    name: [member.salutation, member.firstName, member.lastName].filter(Boolean).join(" "),
+    previousAmount: parseMoney(bill?.previousAmount ?? 0),
+    previousInterest: parseMoney(bill?.previousInterest ?? 0),
+    currentAmount: parseMoney(bill?.totalAmount ?? 0),
+    currentInterest: parseMoney(bill?.currentInterest ?? 0),
+    totalOutstanding: parseMoney(bill?.totalOutstanding ?? 0),
+    amountReceived: "",
+    paymentMode: "CASH",
+    receivableAccount: defaultReceivableAccount,
+    remarks: "",
+  });
 
   const [collectionRows, setCollectionRows] = useState<Record<string, CollectionRow>>(() => {
     const rows: Record<string, CollectionRow> = {};
 
     for (const member of members) {
-      const bill = latestBillByMember.get(member.flatNo);
-      if (!bill) {
-        continue;
-      }
-
-      rows[member.id] = {
-        memberId: member.id,
-        billId: bill.id,
-        flatNo: member.flatNo,
-        name: [member.salutation, member.firstName, member.lastName]
-          .filter(Boolean)
-          .join(" "),
-        previousAmount: parseMoney(bill.previousAmount),
-        previousInterest: parseMoney(bill.previousInterest),
-        currentAmount: parseMoney(bill.totalAmount),
-        currentInterest: parseMoney(bill.currentInterest),
-        totalOutstanding: parseMoney(bill.totalOutstanding),
-        amountReceived: "",
-        paymentMode: "CASH",
-        remarks: "",
-      };
+      rows[member.id] = buildCollectionRow(member, latestBillByMember.get(member.id) ?? null);
     }
 
     return rows;
@@ -232,6 +308,118 @@ export default function CollectionTab({
     }
     return map;
   }, [collectionRows]);
+  const receiptRows = useMemo(
+    () =>
+      [...receipts].sort(
+        (a, b) => new Date(b.receiptDate).getTime() - new Date(a.receiptDate).getTime(),
+      ),
+    [receipts],
+  );
+  const filteredReceiptRows = useMemo(() => {
+    const from = new Date(`${receiptFromDate}T00:00:00`);
+    const to = new Date(`${receiptToDate}T23:59:59`);
+    const term = receiptSearchTerm.trim().toLowerCase();
+
+    if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || from > to) {
+      return [] as Receipt[];
+    }
+
+    return receiptRows.filter((receipt) => {
+      const receiptDate =
+        receipt.receiptDate instanceof Date ? receipt.receiptDate : new Date(receipt.receiptDate);
+
+      if (receiptDate < from || receiptDate > to) {
+        return false;
+      }
+
+      if (!term) {
+        return true;
+      }
+
+      return (
+        receipt.receiptNumber.toLowerCase().includes(term) ||
+        receipt.flatNo.toLowerCase().includes(term) ||
+        receipt.memberName.toLowerCase().includes(term) ||
+        (receipt.bankName ?? "").toLowerCase().includes(term) ||
+        (receipt.remarks ?? "").toLowerCase().includes(term)
+      );
+    });
+  }, [receiptFromDate, receiptRows, receiptSearchTerm, receiptToDate]);
+
+  const handleReverseReceipt = async (receiptId: string, receiptNumber: string) => {
+    const reason = window.prompt(
+      `Enter reason for reversing receipt ${receiptNumber}:`,
+      "Wrong receipt entry",
+    );
+
+    if (reason === null) {
+      return;
+    }
+
+    setReversingReceiptId(receiptId);
+    const result = await reverseReceipt(societyId, receiptId, reason);
+    setReversingReceiptId(null);
+
+    if (result.success) {
+      alert(`Receipt ${receiptNumber} reversed successfully.`);
+      return;
+    }
+
+    alert(`Error reversing receipt: ${result.error}`);
+  };
+
+  const handleEditReceiptAmount = async (
+    receiptId: string,
+    receiptNumber: string,
+    currentAmount: number | string,
+  ) => {
+    const nextAmountRaw = window.prompt(
+      `Enter new amount for receipt ${receiptNumber}:`,
+      String(parseMoney(currentAmount)),
+    );
+
+    if (nextAmountRaw === null) {
+      return;
+    }
+
+    const nextAmount = parseMoney(nextAmountRaw);
+    if (!(nextAmount > 0)) {
+      alert("Amount must be greater than zero.");
+      return;
+    }
+
+    setEditingReceiptId(receiptId);
+    const result = await updateReceiptAmount(societyId, receiptId, nextAmount);
+    setEditingReceiptId(null);
+
+    if (result.success) {
+      alert(`Receipt ${receiptNumber} updated successfully.`);
+      return;
+    }
+
+    alert(`Error updating receipt: ${result.error}`);
+  };
+
+  const handleDeleteReceipt = async (receiptId: string, receiptNumber: string) => {
+    const confirmed = window.confirm(
+      `Delete receipt ${receiptNumber}? This will remove the receipt entry permanently.`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setDeletingReceiptId(receiptId);
+    const result = await deleteReceipt(societyId, receiptId);
+    setDeletingReceiptId(null);
+
+    if (result.success) {
+      alert(`Receipt ${receiptNumber} deleted successfully.`);
+      return;
+    }
+
+    alert(`Error deleting receipt: ${result.error}`);
+  };
 
   const toggleAllVisibleRows = () => {
     setSelectedRows((prev) => {
@@ -243,9 +431,14 @@ export default function CollectionTab({
     });
   };
 
+  const memberById = useMemo(
+    () => new Map(members.map((member) => [member.id, member])),
+    [members],
+  );
+
   const updateRow = (
     memberId: string,
-    field: "amountReceived" | "paymentMode" | "remarks",
+    field: "amountReceived" | "paymentMode" | "receivableAccount" | "remarks",
     value: string,
   ) => {
     setCollectionRows((prev) => ({
@@ -255,6 +448,33 @@ export default function CollectionTab({
         [field]: value,
       },
     }));
+  };
+
+  const updateBillReference = (memberId: string, selectedBillId: string) => {
+    const member = memberById.get(memberId);
+    if (!member) {
+      return;
+    }
+
+    const selectedBill =
+      billsByFlat
+        .get(member.flatNo)
+        ?.find((bill) => bill.id === selectedBillId) ?? null;
+
+    setCollectionRows((prev) => {
+      const current = prev[memberId];
+      const next = buildCollectionRow(member, selectedBill);
+      return {
+        ...prev,
+        [memberId]: {
+          ...next,
+          amountReceived: current.amountReceived,
+          paymentMode: current.paymentMode,
+          receivableAccount: current.receivableAccount,
+          remarks: current.remarks,
+        },
+      };
+    });
   };
 
   const handleSave = async () => {
@@ -272,9 +492,10 @@ export default function CollectionTab({
       societyId,
       selectedMemberIds.map((memberId) => ({
         memberId,
-        billId: collectionRows[memberId].billId,
+        billId: collectionRows[memberId].selectedBillId || null,
         amountReceived: parseMoney(collectionRows[memberId].amountReceived),
         paymentMode: collectionRows[memberId].paymentMode,
+        receivableAccount: collectionRows[memberId].receivableAccount,
         remarks: collectionRows[memberId].remarks,
         receiptDate,
       })),
@@ -320,6 +541,8 @@ export default function CollectionTab({
       const dateRaw = (cols[2] ?? "").trim();
       const paymentModeRaw = (cols[3] ?? "").trim();
       const remarks = (cols[4] ?? "").trim();
+      const requestedAccount = (cols[5] ?? "").trim();
+      const billReferenceRaw = (cols[6] ?? "").trim();
 
       if (!flatNo) {
         invalidRows.push({ rowNo, raw: line, reason: "Missing Flat No" });
@@ -328,8 +551,40 @@ export default function CollectionTab({
 
       const matched = collectionRowByFlat.get(flatNo.toLowerCase());
       if (!matched) {
-        invalidRows.push({ rowNo, raw: line, reason: `Flat ${flatNo} not found in current bills` });
+        invalidRows.push({ rowNo, raw: line, reason: `Flat ${flatNo} not found` });
         return;
+      }
+
+      let billId: string | null = matched.selectedBillId || null;
+      let billReferenceLabel = billId ? "Latest Bill" : "Advance / No Bill";
+
+      if (billReferenceRaw) {
+        const normalizedBillReference = billReferenceRaw.trim().toUpperCase();
+        if (["ADVANCE", "NO BILL", "NO_BILL", "NOBILL", "NONE"].includes(normalizedBillReference)) {
+          billId = null;
+          billReferenceLabel = "Advance / No Bill";
+        } else {
+          const matchingBill =
+            billsByFlat
+              .get(matched.flatNo)
+              ?.find((bill) => bill.billNumber.toUpperCase() === normalizedBillReference) ?? null;
+
+          if (!matchingBill) {
+            invalidRows.push({
+              rowNo,
+              raw: line,
+              reason: `Bill reference ${billReferenceRaw} not found for flat ${flatNo}`,
+            });
+            return;
+          }
+
+          billId = matchingBill.id;
+          billReferenceLabel = matchingBill.billNumber;
+        }
+      } else if (billId) {
+        const defaultBill =
+          billsByFlat.get(matched.flatNo)?.find((bill) => bill.id === billId) ?? null;
+        billReferenceLabel = defaultBill?.billNumber ?? "Latest Bill";
       }
 
       const amountReceived = parseMoney(amountRaw);
@@ -354,9 +609,16 @@ export default function CollectionTab({
         amountReceived,
         receiptDate: parsedDate,
         paymentMode: normalizePaymentMode(paymentModeRaw),
-        remarks,
+        receivableAccount:
+          receivableAccountMap.get(requestedAccount.toLowerCase()) ??
+          (requestedAccount ? "Suspense Account" : defaultReceivableAccount),
+        remarks:
+          receivableAccountMap.get(requestedAccount.toLowerCase()) || !requestedAccount
+            ? remarks
+            : `${remarks ? `${remarks} | ` : ""}Account not found: ${requestedAccount}`,
         memberId: matched.memberId,
-        billId: matched.billId,
+        billId,
+        billReferenceLabel,
       });
     });
 
@@ -378,6 +640,7 @@ export default function CollectionTab({
         billId: row.billId,
         amountReceived: row.amountReceived,
         paymentMode: row.paymentMode,
+        receivableAccount: row.receivableAccount,
         remarks: row.remarks,
         receiptDate: row.receiptDate,
       })),
@@ -395,10 +658,10 @@ export default function CollectionTab({
     alert("Error saving pasted collections: " + result.error);
   };
 
-  if (Object.keys(collectionRows).length === 0) {
+  if (members.length === 0) {
     return (
       <div className="rounded-2xl border border-dashed border-gray-300 bg-white p-10 text-center text-sm text-gray-500">
-        No saved bills found yet. Generate and save bills first, then collections can be recorded.
+        No members found yet. Add members first, then collections can be recorded.
       </div>
     );
   }
@@ -406,10 +669,10 @@ export default function CollectionTab({
   return (
     <div className="space-y-5">
       <div className="flex space-x-1 rounded-xl bg-gray-100 p-1 w-fit">
-        {["Grid Entry", "Bulk Paste"].map((tab) => (
+        {["Grid Entry", "Bulk Paste", "Manage Receipts"].map((tab) => (
           <button
             key={tab}
-            onClick={() => setActiveViewMode(tab as CollectionViewMode)}
+            onClick={() => setActiveViewMode(tab as CollectionTabMode)}
             className={`rounded-lg px-6 py-2 text-sm font-semibold transition-all ${
               activeViewMode === tab
                 ? "bg-white text-blue-600 shadow-sm"
@@ -483,6 +746,7 @@ export default function CollectionTab({
               </th>
               <th className="px-4 py-3">Flat No</th>
               <th className="px-4 py-3">Name</th>
+              <th className="px-4 py-3">Bill Reference</th>
               <th className="px-4 py-3">Prev Amount</th>
               <th className="px-4 py-3">Prev Interest</th>
               <th className="px-4 py-3">Current Amount</th>
@@ -490,6 +754,7 @@ export default function CollectionTab({
               <th className="px-4 py-3">Total Outstanding</th>
               <th className="px-4 py-3">Amount Received</th>
               <th className="px-4 py-3">Payment Details</th>
+              <th className="px-4 py-3">Receivable A/c</th>
               <th className="px-4 py-3">Remarks</th>
             </tr>
           </thead>
@@ -510,6 +775,20 @@ export default function CollectionTab({
                 </td>
                 <td className="px-4 py-3 font-semibold text-blue-700">{row.flatNo}</td>
                 <td className="px-4 py-3">{row.name}</td>
+                <td className="px-4 py-3">
+                  <select
+                    value={row.selectedBillId}
+                    onChange={(e) => updateBillReference(row.memberId, e.target.value)}
+                    className="w-56 rounded-md border border-gray-200 bg-white p-2 outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">Advance / No Bill Reference</option>
+                    {(billsByFlat.get(row.flatNo) ?? []).map((bill) => (
+                      <option key={bill.id} value={bill.id}>
+                        {bill.billNumber} | Due {formatMoney(parseMoney(bill.totalOutstanding))}
+                      </option>
+                    ))}
+                  </select>
+                </td>
                 <td className="px-4 py-3 font-mono">{formatMoney(row.previousAmount)}</td>
                 <td className="px-4 py-3 font-mono">{formatMoney(row.previousInterest)}</td>
                 <td className="px-4 py-3 font-mono">{formatMoney(row.currentAmount)}</td>
@@ -542,6 +821,22 @@ export default function CollectionTab({
                   </select>
                 </td>
                 <td className="px-4 py-3">
+                  <select
+                    value={row.receivableAccount}
+                    onChange={(e) =>
+                      updateRow(row.memberId, "receivableAccount", e.target.value)
+                    }
+                    className="w-40 rounded-md border border-gray-200 bg-white p-2 outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    {receivableAccounts.map((account) => (
+                      <option key={account.id} value={account.accountName}>
+                        {account.accountName}
+                      </option>
+                    ))}
+                    <option value="Suspense Account">Suspense Account</option>
+                  </select>
+                </td>
+                <td className="px-4 py-3">
                   <input
                     type="text"
                     value={row.remarks}
@@ -555,22 +850,24 @@ export default function CollectionTab({
           </tbody>
         </table>
       </div>
+
       </>
       ) : (
+      activeViewMode === "Bulk Paste" ? (
       <div className="space-y-4 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
         <p className="text-sm text-gray-600">
           Paste Excel rows in this order:
-          <span className="font-semibold"> Flat No | Amount Paid | Payment Date | Mode | Remarks</span>
+          <span className="font-semibold"> Flat No | Amount Paid | Payment Date | Mode | Remarks | Account | Bill Ref (optional)</span>
         </p>
         <p className="text-xs text-gray-500">
-          Date formats accepted: YYYY-MM-DD, DD/MM/YYYY, DD-MM-YYYY, or Excel serial date.
+          Date formats accepted: YYYY-MM-DD, DD/MM/YYYY, DD-MM-YYYY, or Excel serial date. For no bill reference, use `ADVANCE` or leave the bill ref as `ADVANCE`.
         </p>
 
         <textarea
           value={pasteData}
           onChange={(e) => setPasteData(e.target.value)}
           className="h-44 w-full rounded-lg border border-gray-300 p-3 font-mono text-sm outline-none focus:ring-2 focus:ring-blue-500"
-          placeholder={"A-101\t2500\t2026-04-14\tUPI\tApril payment"}
+          placeholder={"A-101\t2500\t2026-04-14\tUPI\tApril payment\tCash\tB-26040001\nA-102\t5000\t2026-04-14\tNEFT\tAdvance received\tABC Bank\tADVANCE"}
         />
 
         <div className="flex flex-wrap gap-3">
@@ -604,6 +901,8 @@ export default function CollectionTab({
                   <th className="px-3 py-2">Amount</th>
                   <th className="px-3 py-2">Date</th>
                   <th className="px-3 py-2">Mode</th>
+                  <th className="px-3 py-2">Account</th>
+                  <th className="px-3 py-2">Bill Ref</th>
                   <th className="px-3 py-2">Remarks</th>
                 </tr>
               </thead>
@@ -615,6 +914,8 @@ export default function CollectionTab({
                     <td className="px-3 py-2 font-mono">{formatMoney(row.amountReceived)}</td>
                     <td className="px-3 py-2">{row.receiptDate}</td>
                     <td className="px-3 py-2">{row.paymentMode}</td>
+                    <td className="px-3 py-2">{row.receivableAccount}</td>
+                    <td className="px-3 py-2">{row.billReferenceLabel}</td>
                     <td className="px-3 py-2">{row.remarks || "-"}</td>
                   </tr>
                 ))}
@@ -638,6 +939,170 @@ export default function CollectionTab({
           </div>
         ) : null}
       </div>
+      ) : (
+      <div className="rounded-2xl border border-gray-200 bg-white shadow-sm">
+        <div className="border-b border-gray-100 px-5 py-4">
+          <h3 className="text-lg font-semibold text-gray-800">Manage Receipts</h3>
+          <p className="text-sm text-gray-500">
+            Filter receipts by period, then edit amount, delete, or reverse the selected entry.
+          </p>
+        </div>
+
+        <div className="grid gap-4 border-b border-gray-100 px-5 py-4 md:grid-cols-3">
+          <label className="block">
+            <span className="text-xs font-bold uppercase tracking-wide text-gray-500">
+              From Date
+            </span>
+            <input
+              type="date"
+              value={receiptFromDate}
+              onChange={(e) => setReceiptFromDate(e.target.value)}
+              className="mt-1 block w-full rounded-lg border border-gray-300 p-3 outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </label>
+
+          <label className="block">
+            <span className="text-xs font-bold uppercase tracking-wide text-gray-500">
+              To Date
+            </span>
+            <input
+              type="date"
+              value={receiptToDate}
+              onChange={(e) => setReceiptToDate(e.target.value)}
+              className="mt-1 block w-full rounded-lg border border-gray-300 p-3 outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </label>
+
+          <label className="block">
+            <span className="text-xs font-bold uppercase tracking-wide text-gray-500">
+              Search
+            </span>
+            <input
+              type="text"
+              value={receiptSearchTerm}
+              onChange={(e) => setReceiptSearchTerm(e.target.value)}
+              placeholder="Receipt no, flat no, name, bank, remarks"
+              className="mt-1 block w-full rounded-lg border border-gray-300 p-3 outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </label>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-left text-sm">
+            <thead className="border-b border-gray-200 bg-gray-50">
+              <tr>
+                <th className="px-4 py-3">Receipt No</th>
+                <th className="px-4 py-3">Date</th>
+                <th className="px-4 py-3">Flat No</th>
+                <th className="px-4 py-3">Member Name</th>
+                <th className="px-4 py-3">Mode / Bank</th>
+                <th className="px-4 py-3 text-right">Amount</th>
+                <th className="px-4 py-3">Remarks</th>
+                <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3 text-right">Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {filteredReceiptRows.length > 0 ? (
+                filteredReceiptRows.map((receipt) => (
+                  <tr key={receipt.id} className="hover:bg-gray-50">
+                    <td className="px-4 py-3 font-mono">{receipt.receiptNumber}</td>
+                    <td className="px-4 py-3">
+                      {new Date(receipt.receiptDate).toLocaleDateString("en-IN")}
+                    </td>
+                    <td className="px-4 py-3 font-semibold text-blue-700">{receipt.flatNo}</td>
+                    <td className="px-4 py-3">{receipt.memberName}</td>
+                    <td className="px-4 py-3">
+                      {receipt.paymentMode}
+                      {receipt.bankName ? ` | ${receipt.bankName}` : ""}
+                    </td>
+                    <td className="px-4 py-3 text-right font-mono">
+                      {formatMoney(parseMoney(receipt.amount))}
+                    </td>
+                    <td className="px-4 py-3">
+                      {receipt.status === "REVERSED"
+                        ? receipt.reversalReason || receipt.remarks || "-"
+                        : receipt.remarks || "-"}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={`rounded-full px-2 py-1 text-xs font-semibold ${
+                          receipt.status === "REVERSED"
+                            ? "bg-rose-100 text-rose-700"
+                            : "bg-emerald-100 text-emerald-700"
+                        }`}
+                      >
+                        {receipt.status}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      {receipt.status === "ACTIVE" ? (
+                        <div className="flex justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleEditReceiptAmount(
+                                receipt.id,
+                                receipt.receiptNumber,
+                                receipt.amount,
+                              )
+                            }
+                            disabled={!canManageCollections || editingReceiptId === receipt.id}
+                            className={`rounded-lg border border-blue-300 px-3 py-2 text-sm font-semibold text-blue-700 ${
+                              !canManageCollections || editingReceiptId === receipt.id
+                                ? "cursor-not-allowed opacity-50"
+                                : "hover:bg-blue-50"
+                            }`}
+                          >
+                            {editingReceiptId === receipt.id ? "Saving..." : "Edit Amount"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleDeleteReceipt(receipt.id, receipt.receiptNumber)
+                            }
+                            disabled={!canManageCollections || deletingReceiptId === receipt.id}
+                            className={`rounded-lg border border-red-300 px-3 py-2 text-sm font-semibold text-red-700 ${
+                              !canManageCollections || deletingReceiptId === receipt.id
+                                ? "cursor-not-allowed opacity-50"
+                                : "hover:bg-red-50"
+                            }`}
+                          >
+                            {deletingReceiptId === receipt.id ? "Deleting..." : "Delete"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleReverseReceipt(receipt.id, receipt.receiptNumber)
+                            }
+                            disabled={!canManageCollections || reversingReceiptId === receipt.id}
+                            className={`rounded-lg border border-rose-300 px-3 py-2 text-sm font-semibold text-rose-700 ${
+                              !canManageCollections || reversingReceiptId === receipt.id
+                                ? "cursor-not-allowed opacity-50"
+                                : "hover:bg-rose-50"
+                            }`}
+                          >
+                            {reversingReceiptId === receipt.id ? "Reversing..." : "Reverse"}
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-gray-400">Locked</span>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={9} className="px-4 py-10 text-center text-gray-400">
+                    No receipts found for the selected period.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      )
       )}
     </div>
   );

@@ -93,6 +93,7 @@ model Society {
   ledgerConfigs SocietyLedgerConfig[]
   standardRates FlatStandardRate[]
   bills         Bill[]
+  journalEntries JournalEntry[]
   transactions   Transaction[]
   receipts       Receipt[]
 }
@@ -149,6 +150,7 @@ model MemberProfile {
 
   // To view the complete financial ledger (Charges and Payments) for this member
   transactions    Transaction[]
+  journalEntries  JournalEntry[]
   // Relationship to Society
   societyId       String
   society         Society  @relation(fields: [societyId], references: [id], onDelete: Cascade)
@@ -235,6 +237,7 @@ model Bill {
   status         BillStatus  @default(UNPAID)
 
   items          BillItem[]
+  receipts       Receipt[]
   transaction    Transaction? // Optional: Link to the CHARGE transaction
 
   @@unique([societyId, billNumber])
@@ -271,11 +274,17 @@ model Receipt {
   memberId       String
   member          MemberProfile @relation(fields: [memberId], references: [id], onDelete: Cascade)
   transactionId  String      @unique // Link to the PAYMENT transaction
+  billId         String?
+  status         ReceiptStatus @default(ACTIVE)
+  reversedAt     DateTime?
+  reversalReason String?
 
+  bill           Bill?     @relation(fields: [billId], references: [id], onDelete: SetNull)
   transaction    Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
 
   @@index([societyId, receiptDate])
   @@index([memberId])
+  @@index([billId])
 }
 
 // --- 3. THE UNIFIED LEDGER ---
@@ -313,9 +322,44 @@ enum BillStatus {
   PAID
 }
 
+enum ReceiptStatus {
+  ACTIVE
+  REVERSED
+}
+
 enum TransType {
   CHARGE      // Bill generated (Income)
   PAYMENT     // Receipt recorded (Cash In)
   EXPENSE     // Society spending (Cash Out)
   OTHER_INCOME // e.g., Interest or Clubhouse rent
+}
+
+enum LedgerSide {
+  DEBIT
+  CREDIT
+}
+
+model JournalEntry {
+  id               String       @id @default(cuid())
+  date             DateTime
+  amount           Decimal      @db.Decimal(12, 2)
+  debitAccountName String
+  creditAccountName String
+  remarks          String?
+  referenceNo      String?
+  memberLedgerSide LedgerSide?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  societyId        String
+  society          Society      @relation(fields: [societyId], references: [id], onDelete: Cascade)
+  memberId         String?
+  member           MemberProfile? @relation(fields: [memberId], references: [id], onDelete: SetNull)
+
+  reversalOfId     String?      @unique
+  reversalOf       JournalEntry? @relation("JournalEntryReversal", fields: [reversalOfId], references: [id], onDelete: SetNull)
+  reversedBy       JournalEntry[] @relation("JournalEntryReversal")
+
+  @@index([societyId, date])
+  @@index([memberId, date])
 }

@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { PrismaClient } from "@prisma/client";
+import { INTEREST_RECEIVED_ACCOUNT_NAME } from "@/lib/accounts";
 
 const prisma = new PrismaClient();
 
@@ -14,6 +15,16 @@ export default function CreateSocietyPage() {
     const secretary = formData.get("secretary") as string;
     const treasurer = formData.get("treasurer") as string;
     const auditor = formData.get("auditor") as string;
+    const interestHead = await prisma.globalLedgerHead.upsert({
+      where: { name: INTEREST_RECEIVED_ACCOUNT_NAME },
+      update: {
+        financialHead: "INCOME",
+      },
+      create: {
+        name: INTEREST_RECEIVED_ACCOUNT_NAME,
+        financialHead: "INCOME",
+      },
+    });
     const globalHeads = await prisma.globalLedgerHead.findMany();
 
     await prisma.society.create({
@@ -33,6 +44,7 @@ export default function CreateSocietyPage() {
             calculationType: head.defaultCalculationType,
             includeInMaintenanceBill: false,
             interestApplicable: false,
+            isActive: head.id === interestHead.id,
           })),
         },
       },

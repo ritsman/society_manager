@@ -133,6 +133,7 @@ export default async function PrintMemberLedgerPage({
         member: {
           flatNo: member.flatNo,
         },
+        status: "ACTIVE",
         receiptDate: {
           gte: from,
           lte: to,

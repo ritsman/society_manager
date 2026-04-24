@@ -3,6 +3,7 @@ import { FinancialHead, PrismaClient } from "@prisma/client";
 const prisma = new PrismaClient();
 
 const ledgerHeads: { name: string; financialHead: FinancialHead }[] = [
+  { name: "INTEREST RECEIVED", financialHead: "INCOME" },
   { name: "MAINTENANCE CHARGES", financialHead: "INCOME" },
   { name: "SINKING FUND", financialHead: "CAPITAL" },
   { name: "REPAIR FUND", financialHead: "CAPITAL" },

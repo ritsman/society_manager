@@ -8,6 +8,7 @@ import CollectionTab from "@/components/society/CollectionTab";
 import ReportsTab from "@/components/society/ReportsTab";
 import SocietyProfileTab from "@/components/society/SocietyProfileTab";
 import { authOptions } from "@/lib/auth";
+import { INTEREST_RECEIVED_ACCOUNT_NAME } from "@/lib/accounts";
 
 const prisma = new PrismaClient();
 const financialHeadOrder = [
@@ -38,6 +39,45 @@ export default async function SocietyDetailsPage({ params, searchParams }: PageP
   const { id } = await params;
   const { tab } = await searchParams;
   const activeTab = tab || "Profile";
+
+  const interestHead = await prisma.globalLedgerHead.upsert({
+    where: { name: INTEREST_RECEIVED_ACCOUNT_NAME },
+    update: {
+      financialHead: "INCOME",
+    },
+    create: {
+      name: INTEREST_RECEIVED_ACCOUNT_NAME,
+      financialHead: "INCOME",
+    },
+  });
+
+  await prisma.societyLedgerConfig.upsert({
+    where: {
+      societyId_accountName: {
+        societyId: id,
+        accountName: INTEREST_RECEIVED_ACCOUNT_NAME,
+      },
+    },
+    update: {
+      financialHead: "INCOME",
+      calculationType: interestHead.defaultCalculationType,
+      isActive: true,
+      includeInMaintenanceBill: false,
+      interestApplicable: false,
+      globalLedgerHeadId: interestHead.id,
+    },
+    create: {
+      societyId: id,
+      globalLedgerHeadId: interestHead.id,
+      accountName: INTEREST_RECEIVED_ACCOUNT_NAME,
+      financialHead: "INCOME",
+      calculationType: interestHead.defaultCalculationType,
+      isActive: true,
+      includeInMaintenanceBill: false,
+      interestApplicable: false,
+      defaultAmount: 0,
+    },
+  });
 
   // Fetch society and its members
   const society = await prisma.society.findUnique({
@@ -79,6 +119,24 @@ export default async function SocietyDetailsPage({ params, searchParams }: PageP
           },
         },
         orderBy: { receiptDate: "asc" },
+      },
+      journalEntries: {
+        include: {
+          member: {
+            select: {
+              flatNo: true,
+              salutation: true,
+              firstName: true,
+              lastName: true,
+            },
+          },
+          reversedBy: {
+            select: {
+              id: true,
+            },
+          },
+        },
+        orderBy: { date: "desc" },
       },
     },
   });
@@ -196,7 +254,9 @@ export default async function SocietyDetailsPage({ params, searchParams }: PageP
             )}
             receipts={JSON.parse(
               JSON.stringify(
-                society.receipts.map((receipt) => ({
+                society.receipts
+                  .filter((receipt) => receipt.status === "ACTIVE")
+                  .map((receipt) => ({
                   ...receipt,
                   flatNo: receipt.member.flatNo,
                 })),
@@ -243,6 +303,42 @@ export default async function SocietyDetailsPage({ params, searchParams }: PageP
                 })),
               ),
             )}
+            receipts={JSON.parse(
+              JSON.stringify(
+                society.receipts.map((receipt) => ({
+                  id: receipt.id,
+                  receiptNumber: receipt.receiptNumber,
+                  receiptDate: receipt.receiptDate,
+                  flatNo: receipt.member.flatNo,
+                  memberName: [
+                    receipt.member.salutation,
+                    receipt.member.firstName,
+                    receipt.member.lastName,
+                  ]
+                    .filter(Boolean)
+                    .join(" "),
+                  amount: receipt.amount,
+                  paymentMode: receipt.paymentMode,
+                  bankName: receipt.bankName,
+                  remarks: receipt.remarks,
+                  status: receipt.status,
+                  reversalReason: receipt.reversalReason,
+                })),
+              ),
+            )}
+            receivableAccounts={JSON.parse(
+              JSON.stringify(
+                masterAccounts
+                  .filter(
+                    (account) =>
+                      account.financialHead === "CURRENT_ASSET" && account.isActive,
+                  )
+                  .map((account) => ({
+                    id: account.id,
+                    accountName: account.accountName,
+                  })),
+              ),
+            )}
           />
         )}
 
@@ -287,6 +383,53 @@ export default async function SocietyDetailsPage({ params, searchParams }: PageP
           <ReportsTab
             societyId={id}
             billingFrequency={society.billFrequency}
+            members={JSON.parse(
+              JSON.stringify(
+                society.members.map((member) => ({
+                  id: member.id,
+                  flatNo: member.flatNo,
+                  memberName: [member.salutation, member.firstName, member.lastName]
+                    .filter(Boolean)
+                    .join(" "),
+                  openingBalance: member.openingBalance,
+                  openingInterest: member.openingInterest,
+                })),
+              ),
+            )}
+            ledgerAccounts={JSON.parse(
+              JSON.stringify(
+                masterAccounts
+                  .filter((account) => account.isActive)
+                  .map((account) => ({
+                    id: account.id,
+                    accountName: account.accountName,
+                    financialHead: account.financialHead,
+                })),
+              ),
+            )}
+            journalEntries={JSON.parse(
+              JSON.stringify(
+                society.journalEntries.map((entry) => ({
+                  id: entry.id,
+                  date: entry.date,
+                  amount: entry.amount,
+                  debitAccountName: entry.debitAccountName,
+                  creditAccountName: entry.creditAccountName,
+                  remarks: entry.remarks,
+                  referenceNo: entry.referenceNo,
+                  memberId: entry.memberId,
+                  memberLedgerSide: entry.memberLedgerSide,
+                  reversalOfId: entry.reversalOfId,
+                  isReversed: entry.reversedBy.length > 0,
+                  memberFlatNo: entry.member?.flatNo ?? null,
+                  memberName: entry.member
+                    ? [entry.member.salutation, entry.member.firstName, entry.member.lastName]
+                        .filter(Boolean)
+                        .join(" ")
+                    : null,
+                })),
+              ),
+            )}
             bills={JSON.parse(
               JSON.stringify(
                 society.bills.map((bill) => ({
@@ -320,8 +463,11 @@ export default async function SocietyDetailsPage({ params, searchParams }: PageP
             )}
             receipts={JSON.parse(
               JSON.stringify(
-                society.receipts.map((receipt) => ({
+                society.receipts
+                  .filter((receipt) => receipt.status === "ACTIVE")
+                  .map((receipt) => ({
                   id: receipt.id,
+                  memberId: receipt.memberId,
                   receiptNumber: receipt.receiptNumber,
                   receiptDate: receipt.receiptDate,
                   flatNo: receipt.member.flatNo,

@@ -121,6 +121,8 @@ export default function MasterTab({
     return rows;
   });
   const [isSaving, setIsSaving] = useState(false);
+  const [standardRatePasteData, setStandardRatePasteData] = useState("");
+  const [standardRatePasteMessage, setStandardRatePasteMessage] = useState<string | null>(null);
 
   const handleFieldChange = <K extends keyof SocietyAccount>(
     id: string,
@@ -220,6 +222,93 @@ export default function MasterTab({
         [accountId]: value,
       },
     }));
+  };
+
+  const applyStandardRatePaste = () => {
+    const lines = standardRatePasteData
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    if (lines.length < 2) {
+      setStandardRatePasteMessage(
+        "Paste a header row and at least one flat row. Format: Flat No, then maintenance heads.",
+      );
+      return;
+    }
+
+    const headerColumns = lines[0].split("\t").map((column) => column.trim());
+    const normalizedHeaderMap = new Map(
+      headerColumns.map((column, index) => [column.toLowerCase(), index]),
+    );
+    const flatNoIndex =
+      normalizedHeaderMap.get("flat no") ??
+      normalizedHeaderMap.get("flatno") ??
+      normalizedHeaderMap.get("flat");
+
+    if (flatNoIndex === undefined) {
+      setStandardRatePasteMessage(
+        "Header row must include a first-column label like Flat No.",
+      );
+      return;
+    }
+
+    const accountIndexMap = new Map<string, number>();
+    const missingAccounts: string[] = [];
+
+    for (const account of maintenanceRateAccounts) {
+      const index = normalizedHeaderMap.get(account.accountName.trim().toLowerCase());
+      if (index === undefined) {
+        missingAccounts.push(account.accountName);
+        continue;
+      }
+      accountIndexMap.set(account.id, index);
+    }
+
+    if (missingAccounts.length > 0) {
+      setStandardRatePasteMessage(
+        `Header is missing these maintenance heads: ${missingAccounts.join(", ")}`,
+      );
+      return;
+    }
+
+    const memberFlatNos = new Set(members.map((member) => member.flatNo.trim().toLowerCase()));
+    const nextRates = { ...localStandardRates };
+    let updatedRows = 0;
+    const unknownFlats: string[] = [];
+
+    for (const line of lines.slice(1)) {
+      const columns = line.split("\t");
+      const flatNo = (columns[flatNoIndex] ?? "").trim();
+
+      if (!flatNo) {
+        continue;
+      }
+
+      if (!memberFlatNos.has(flatNo.toLowerCase())) {
+        unknownFlats.push(flatNo);
+        continue;
+      }
+
+      nextRates[flatNo] = {
+        ...(nextRates[flatNo] ?? {}),
+      };
+
+      for (const account of maintenanceRateAccounts) {
+        const valueIndex = accountIndexMap.get(account.id);
+        const cellValue = valueIndex !== undefined ? (columns[valueIndex] ?? "").trim() : "";
+        nextRates[flatNo][account.id] = cellValue || "0";
+      }
+
+      updatedRows += 1;
+    }
+
+    setLocalStandardRates(nextRates);
+    setStandardRatePasteMessage(
+      unknownFlats.length > 0
+        ? `Applied ${updatedRows} row(s). Ignored unknown flats: ${unknownFlats.join(", ")}`
+        : `Applied ${updatedRows} row(s) from pasted data.`,
+    );
   };
 
   const onSaveStandardRates = async () => {
@@ -641,6 +730,37 @@ export default function MasterTab({
               </div>
             ) : (
               <div className="overflow-x-auto p-6">
+                <div className="mb-6 rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                  <p className="text-sm font-semibold text-gray-700">
+                    Paste from Excel
+                  </p>
+                  <p className="mt-1 text-xs text-gray-500">
+                    Paste tab-separated data with a header row. Use:
+                    {" "}
+                    <span className="font-mono">Flat No</span>
+                    {" "}
+                    followed by the exact maintenance head names shown below.
+                  </p>
+                  <textarea
+                    value={standardRatePasteData}
+                    onChange={(e) => setStandardRatePasteData(e.target.value)}
+                    className="mt-3 h-36 w-full rounded-lg border border-gray-300 p-3 font-mono text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder={`Flat No\t${maintenanceRateAccounts.map((account) => account.accountName).join("\t")}\nA-101\t1200\t300\nA-102\t1500\t400`}
+                  />
+                  <div className="mt-3 flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={applyStandardRatePaste}
+                      className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-100"
+                    >
+                      Apply Paste to Grid
+                    </button>
+                    {standardRatePasteMessage && (
+                      <span className="text-sm text-gray-600">{standardRatePasteMessage}</span>
+                    )}
+                  </div>
+                </div>
+
                 <table className="w-full text-left text-sm">
                   <thead className="border-b bg-gray-50 text-gray-600">
                     <tr>
